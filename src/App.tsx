@@ -68,6 +68,7 @@ export default function App() {
   const [isLendDialogOpen, setIsLendDialogOpen] = useState(false);
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isClearInventoryOpen, setIsClearInventoryOpen] = useState(false);
 
   // Track seen reminders to avoid duplicate toasts
   const seenReminders = React.useRef<Set<string>>(new Set());
@@ -318,7 +319,7 @@ export default function App() {
         trustScore: 5.0, // Initial trust score
         status: 'PENDING',
         requesterEmail: user.email || '',
-        requesterName: user.displayName || 'Someone',
+        requesterName: user.name || 'Someone',
       };
 
       await addDoc(collection(db, 'friends'), newFriend);
@@ -660,7 +661,7 @@ export default function App() {
           friendRequests={friendRequests}
           handleAcceptFriendRequest={handleAcceptFriendRequest}
           handleRejectFriendRequest={handleRejectFriendRequest}
-          clearInventory={clearInventory}
+          onOpenClearInventory={() => setIsClearInventoryOpen(true)}
           handleLogout={handleLogout}
         />
       </aside>
@@ -695,7 +696,10 @@ export default function App() {
                 friendRequests={friendRequests}
                 handleAcceptFriendRequest={handleAcceptFriendRequest}
                 handleRejectFriendRequest={handleRejectFriendRequest}
-                clearInventory={clearInventory}
+                onOpenClearInventory={() => {
+                  setIsMobileMenuOpen(false);
+                  setIsClearInventoryOpen(true);
+                }}
                 handleLogout={handleLogout}
               />
             </DialogContent>
@@ -961,6 +965,29 @@ export default function App() {
           </form>
         </DialogContent>
       </Dialog>
+      {/* Clear Inventory Dialog (Root Level) */}
+      <Dialog open={isClearInventoryOpen} onOpenChange={setIsClearInventoryOpen}>
+        <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-xl font-serif italic text-status-overdue">Clear All Data?</DialogTitle>
+            <DialogDescription className="text-ink-dim">
+              This will permanently delete all your lending and borrowing records. This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex gap-3 sm:justify-start">
+            <Button variant="ghost" className="rounded-full" onClick={() => setIsClearInventoryOpen(false)}>Cancel</Button>
+            <Button 
+              className="bg-status-overdue text-bg hover:bg-status-overdue/90 rounded-full px-8"
+              onClick={() => {
+                clearInventory();
+                setIsClearInventoryOpen(false);
+              }}
+            >
+              Yes, Clear All
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -985,7 +1012,7 @@ interface SidebarContentProps {
   friendRequests: Friend[];
   handleAcceptFriendRequest: (request: Friend) => Promise<void>;
   handleRejectFriendRequest: (requestId: string) => Promise<void>;
-  clearInventory: () => Promise<void>;
+  onOpenClearInventory: () => void;
   handleLogout: () => Promise<void>;
 }
 
@@ -1009,7 +1036,7 @@ const SidebarContent = ({
   friendRequests,
   handleAcceptFriendRequest,
   handleRejectFriendRequest,
-  clearInventory,
+  onOpenClearInventory,
   handleLogout
 }: SidebarContentProps) => {
   return (
@@ -1179,33 +1206,10 @@ const SidebarContent = ({
       </div>
 
       <div className="flex flex-col gap-2 mt-8">
-        <Dialog>
-          <DialogTrigger render={
-            <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl">
-              <Trash2 className="w-5 h-5 mr-2" />
-              Clear Inventory
-            </Button>
-          } />
-          <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
-            <DialogHeader>
-              <DialogTitle className="text-xl font-serif italic text-status-overdue">Clear All Data?</DialogTitle>
-              <DialogDescription className="text-ink-dim">
-                This will permanently delete all your lending and borrowing records. This action cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="flex gap-3 sm:justify-start">
-              <DialogClose render={<Button variant="ghost" className="rounded-full">Cancel</Button>} />
-              <DialogClose render={
-                <Button 
-                  className="bg-status-overdue text-bg hover:bg-status-overdue/90 rounded-full px-8"
-                  onClick={clearInventory}
-                >
-                  Yes, Clear All
-                </Button>
-              } />
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl" onClick={onOpenClearInventory}>
+          <Trash2 className="w-5 h-5 mr-2" />
+          Clear Inventory
+        </Button>
 
         <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl" onClick={handleLogout}>
           <LogOut className="w-5 h-5 mr-2" />

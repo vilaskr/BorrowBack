@@ -81,7 +81,10 @@ service cloud.firestore {
       return data.keys().hasAll(['name', 'email', 'addedBy']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
              data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
-             data.addedBy == request.auth.uid;
+             data.addedBy is string &&
+             (!('status' in data) || data.status in ['PENDING', 'ACCEPTED']) &&
+             (!('requesterEmail' in data) || data.requesterEmail is string) &&
+             (!('requesterName' in data) || data.requesterName is string);
     }
 
     // ===============================================================
@@ -109,10 +112,10 @@ service cloud.firestore {
     }
 
     match /friends/{friendId} {
-      allow read: if isAuthenticated() && resource.data.addedBy == request.auth.uid;
-      allow create: if isAuthenticated() && isValidFriend(request.resource.data);
-      allow update: if isAuthenticated() && resource.data.addedBy == request.auth.uid && isValidFriend(request.resource.data);
-      allow delete: if isAuthenticated() && resource.data.addedBy == request.auth.uid;
+      allow read: if isAuthenticated() && (resource.data.addedBy == request.auth.uid || resource.data.email == request.auth.token.email);
+      allow create: if isAuthenticated() && isValidFriend(request.resource.data) && request.resource.data.addedBy == request.auth.uid;
+      allow update: if isAuthenticated() && (resource.data.addedBy == request.auth.uid || resource.data.email == request.auth.token.email) && isValidFriend(request.resource.data);
+      allow delete: if isAuthenticated() && (resource.data.addedBy == request.auth.uid || resource.data.email == request.auth.token.email);
     }
   }
 }
