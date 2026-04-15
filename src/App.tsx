@@ -26,7 +26,7 @@ import {
   writeBatch,
   deleteDoc
 } from './firebase';
-import { UserProfile, BorrowEntry, EntryStatus } from './types';
+import { UserProfile, BorrowEntry, EntryStatus, Friend } from './types';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -56,7 +56,6 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { Friend } from './types';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -524,155 +523,6 @@ export default function App() {
     return null;
   }, [entries, user]);
 
-  const SidebarContent = () => (
-    <div className="flex flex-col justify-between h-full">
-      <div className="space-y-10">
-        <div className="logo-section">
-          <h1 className="font-serif italic text-3xl text-accent tracking-tighter">BorrowBack</h1>
-          <div className="relative mt-8">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-dim w-4 h-4" />
-            <Input 
-              placeholder="Search entries..." 
-              className="pl-10 h-12 bg-surface-alt border-none rounded-xl text-ink placeholder:text-ink-dim focus-visible:ring-1 focus-visible:ring-accent"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <div className="stats-group space-y-8">
-          <div className="trust-score">
-            <div className="text-[11px] uppercase tracking-[2px] text-ink-dim mb-1">Lender Integrity</div>
-            <div className="text-3xl font-semibold text-accent">{lenderIntegrity}%</div>
-          </div>
-
-          <div className="profile-card bg-surface p-6 rounded-3xl border border-surface-alt space-y-4 shadow-sm shadow-black/5">
-            <div className="flex items-center gap-3">
-              <Avatar className="w-11 h-11 border border-accent rounded-full">
-                <AvatarImage src={user?.photoURL} className="rounded-full" />
-                <AvatarFallback className="bg-surface-alt text-accent rounded-full">{user?.name[0]}</AvatarFallback>
-              </Avatar>
-              <div className="overflow-hidden">
-                <div className="font-semibold truncate flex items-center gap-2">
-                  {user?.name}
-                  {userBadge && <Trophy className={cn("w-3 h-3", userBadge.color)} />}
-                </div>
-                <div className="text-xs text-ink-dim truncate">{user?.email}</div>
-              </div>
-            </div>
-            {userBadge && (
-              <div className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-surface-alt inline-block", userBadge.color)}>
-                {userBadge.label}
-              </div>
-            )}
-            <div>
-              <div className="text-[11px] uppercase tracking-[1px] text-ink-dim mb-1">Active Loans</div>
-              <div className="text-xl font-semibold text-accent">{activeLoansCount} Items</div>
-            </div>
-          </div>
-
-          <div className="friends-section space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="text-[11px] uppercase tracking-[2px] text-ink-dim">Friends</div>
-              <Dialog open={isAddFriendDialogOpen} onOpenChange={setIsAddFriendDialogOpen}>
-                <DialogTrigger render={
-                  <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-accent/10 hover:text-accent">
-                    <UserPlus className="w-4 h-4" />
-                  </Button>
-                } />
-                <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
-                  <DialogHeader>
-                    <DialogTitle className="text-2xl font-serif italic text-accent">Add Friend</DialogTitle>
-                    <DialogDescription className="text-ink-dim">Save friends for quicker lending.</DialogDescription>
-                  </DialogHeader>
-                  <form onSubmit={handleAddFriend} className="space-y-6 py-4">
-                    <div className="space-y-2">
-                      <Label className="text-xs uppercase tracking-widest text-ink-dim">Name</Label>
-                      <Input 
-                        placeholder="Friend's Name" 
-                        className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
-                        value={friendName}
-                        onChange={(e) => setFriendName(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs uppercase tracking-widest text-ink-dim">Email</Label>
-                      <Input 
-                        type="email"
-                        placeholder="friend@example.com" 
-                        className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
-                        value={friendEmail}
-                        onChange={(e) => setFriendEmail(e.target.value)}
-                        required
-                      />
-                    </div>
-                    <Button type="submit" className="w-full h-14 bg-accent text-bg hover:bg-accent/90 rounded-full font-semibold border-none active:scale-95 transition-all">
-                      Save Friend
-                    </Button>
-                  </form>
-                </DialogContent>
-              </Dialog>
-            </div>
-            <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
-              {friends.length === 0 ? (
-                <div className="text-xs text-ink-dim italic">No friends added yet.</div>
-              ) : (
-                friends.map(friend => (
-                  <div key={friend.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-surface-alt transition-colors group">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 bg-accent/10 rounded-full flex items-center justify-center text-[10px] text-accent font-bold">
-                        {friend.name[0]}
-                      </div>
-                      <div className="text-sm font-medium">{friend.name}</div>
-                    </div>
-                    <div className="flex items-center gap-1 text-[10px] text-accent">
-                      <Star className="w-3 h-3 fill-accent" />
-                      {friend.trustScore?.toFixed(1) || "5.0"}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-2 mt-8">
-        <Dialog>
-          <DialogTrigger render={
-            <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl">
-              <Trash2 className="w-5 h-5 mr-2" />
-              Clear Inventory
-            </Button>
-          } />
-          <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
-            <DialogHeader>
-              <DialogTitle className="text-xl font-serif italic text-status-overdue">Clear All Data?</DialogTitle>
-              <DialogDescription className="text-ink-dim">
-                This will permanently delete all your lending and borrowing records. This action cannot be undone.
-              </DialogDescription>
-            </DialogHeader>
-            <DialogFooter className="flex gap-3 sm:justify-start">
-              <Button variant="ghost" className="rounded-full" onClick={() => {}}>Cancel</Button>
-              <Button 
-                className="bg-status-overdue text-bg hover:bg-status-overdue/90 rounded-full px-8"
-                onClick={clearInventory}
-              >
-                Yes, Clear All
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl" onClick={handleLogout}>
-          <LogOut className="w-5 h-5 mr-2" />
-          Sign Out
-        </Button>
-      </div>
-    </div>
-  );
-
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-slate-50">
@@ -732,7 +582,24 @@ export default function App() {
       
       {/* Sidebar - Desktop */}
       <aside className="hidden lg:flex w-80 flex-col p-10 border-r border-surface-alt h-screen sticky top-0">
-        <SidebarContent />
+        <SidebarContent 
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
+          lenderIntegrity={lenderIntegrity}
+          user={user}
+          userBadge={userBadge}
+          activeLoansCount={activeLoansCount}
+          isAddFriendDialogOpen={isAddFriendDialogOpen}
+          setIsAddFriendDialogOpen={setIsAddFriendDialogOpen}
+          friendName={friendName}
+          setFriendName={setFriendName}
+          friendEmail={friendEmail}
+          setFriendEmail={setFriendEmail}
+          handleAddFriend={handleAddFriend}
+          friends={friends}
+          clearInventory={clearInventory}
+          handleLogout={handleLogout}
+        />
       </aside>
 
       {/* Mobile Header */}
@@ -745,7 +612,24 @@ export default function App() {
               </Button>
             } />
             <DialogContent className="bg-bg border-none text-ink p-8 h-[90vh] w-[90vw] max-w-sm rounded-3xl overflow-y-auto">
-              <SidebarContent />
+              <SidebarContent 
+                searchQuery={searchQuery}
+                setSearchQuery={setSearchQuery}
+                lenderIntegrity={lenderIntegrity}
+                user={user}
+                userBadge={userBadge}
+                activeLoansCount={activeLoansCount}
+                isAddFriendDialogOpen={isAddFriendDialogOpen}
+                setIsAddFriendDialogOpen={setIsAddFriendDialogOpen}
+                friendName={friendName}
+                setFriendName={setFriendName}
+                friendEmail={friendEmail}
+                setFriendEmail={setFriendEmail}
+                handleAddFriend={handleAddFriend}
+                friends={friends}
+                clearInventory={clearInventory}
+                handleLogout={handleLogout}
+              />
             </DialogContent>
           </Dialog>
           <h1 className="font-serif italic text-2xl text-accent">BorrowBack</h1>
@@ -975,6 +859,203 @@ export default function App() {
   );
 }
 
+interface SidebarContentProps {
+  searchQuery: string;
+  setSearchQuery: (val: string) => void;
+  lenderIntegrity: number;
+  user: UserProfile | null;
+  userBadge: { label: string, color: string } | null;
+  activeLoansCount: number;
+  isAddFriendDialogOpen: boolean;
+  setIsAddFriendDialogOpen: (val: boolean) => void;
+  friendName: string;
+  setFriendName: (val: string) => void;
+  friendEmail: string;
+  setFriendEmail: (val: string) => void;
+  handleAddFriend: (e: React.FormEvent) => Promise<void>;
+  friends: Friend[];
+  clearInventory: () => Promise<void>;
+  handleLogout: () => Promise<void>;
+}
+
+const SidebarContent = ({
+  searchQuery,
+  setSearchQuery,
+  lenderIntegrity,
+  user,
+  userBadge,
+  activeLoansCount,
+  isAddFriendDialogOpen,
+  setIsAddFriendDialogOpen,
+  friendName,
+  setFriendName,
+  friendEmail,
+  setFriendEmail,
+  handleAddFriend,
+  friends,
+  clearInventory,
+  handleLogout
+}: SidebarContentProps) => {
+  return (
+    <div className="flex flex-col justify-between h-full">
+    <div className="space-y-10">
+      <div className="logo-section">
+        <h1 className="font-serif italic text-3xl text-accent tracking-tighter">BorrowBack</h1>
+        <div className="relative mt-8">
+          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-ink-dim w-4 h-4" />
+          <Input 
+            placeholder="Search entries..." 
+            className="pl-10 h-12 bg-surface-alt border-none rounded-xl text-ink placeholder:text-ink-dim focus-visible:ring-1 focus-visible:ring-accent"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div className="stats-group space-y-8">
+        <div className="trust-score">
+          <div className="text-[11px] uppercase tracking-[2px] text-ink-dim mb-1">Lender Integrity</div>
+          <div className="text-3xl font-semibold text-accent">{lenderIntegrity}%</div>
+        </div>
+
+        <div className="profile-card bg-surface p-6 rounded-3xl border border-surface-alt space-y-4 shadow-sm shadow-black/5">
+          <div className="flex items-center gap-3">
+            <Avatar className="w-11 h-11 border border-accent rounded-full">
+              <AvatarImage src={user?.photoURL} className="rounded-full" />
+              <AvatarFallback className="bg-surface-alt text-accent rounded-full">{user?.name[0]}</AvatarFallback>
+            </Avatar>
+            <div className="overflow-hidden">
+              <div className="font-semibold truncate flex items-center gap-2">
+                {user?.name}
+                {userBadge && <Trophy className={cn("w-3 h-3", userBadge.color)} />}
+              </div>
+              <div className="text-xs text-ink-dim truncate">{user?.email}</div>
+            </div>
+          </div>
+          {userBadge && (
+            <div className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-surface-alt inline-block", userBadge.color)}>
+              {userBadge.label}
+            </div>
+          )}
+          <div>
+            <div className="text-[11px] uppercase tracking-[1px] text-ink-dim mb-1">Active Loans</div>
+            <div className="text-xl font-semibold text-accent">{activeLoansCount} Items</div>
+          </div>
+        </div>
+
+        <div className="friends-section space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="text-[11px] uppercase tracking-[2px] text-ink-dim">Friends</div>
+            <Dialog open={isAddFriendDialogOpen} onOpenChange={setIsAddFriendDialogOpen}>
+              <DialogTrigger render={
+                <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-accent/10 hover:text-accent">
+                  <UserPlus className="w-4 h-4" />
+                </Button>
+              } />
+              <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
+                <DialogHeader>
+                  <DialogTitle className="text-2xl font-serif italic text-accent">Add Friend</DialogTitle>
+                  <DialogDescription className="text-ink-dim">Save friends for quicker lending.</DialogDescription>
+                </DialogHeader>
+                <form onSubmit={handleAddFriend} className="space-y-6 py-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs uppercase tracking-widest text-ink-dim">Name</Label>
+                    <Input 
+                      placeholder="Friend's Name" 
+                      className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                      value={friendName}
+                      onChange={(e) => setFriendName(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs uppercase tracking-widest text-ink-dim">Email</Label>
+                    <Input 
+                      type="email"
+                      placeholder="friend@example.com" 
+                      className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                      value={friendEmail}
+                      onChange={(e) => setFriendEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <Button type="submit" className="w-full h-14 bg-accent text-bg hover:bg-accent/90 rounded-full font-semibold border-none active:scale-95 transition-all">
+                    Save Friend
+                  </Button>
+                </form>
+              </DialogContent>
+            </Dialog>
+          </div>
+          <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+            {friends.length === 0 ? (
+              <div className="text-xs text-ink-dim italic">No friends added yet.</div>
+            ) : (
+              friends.map(friend => (
+                <div key={friend.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-surface-alt transition-colors group">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 bg-accent/10 rounded-full flex items-center justify-center text-[10px] text-accent font-bold">
+                      {friend.name[0]}
+                    </div>
+                    <div className="text-sm font-medium">{friend.name}</div>
+                  </div>
+                  <div className="flex items-center gap-1 text-[10px] text-accent">
+                    <Star className="w-3 h-3 fill-accent" />
+                    {friend.trustScore?.toFixed(1) || "5.0"}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-col gap-2 mt-8">
+        <Dialog>
+          <DialogTrigger render={
+            <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl">
+              <Trash2 className="w-5 h-5 mr-2" />
+              Clear Inventory
+            </Button>
+          } />
+          <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-serif italic text-status-overdue">Clear All Data?</DialogTitle>
+              <DialogDescription className="text-ink-dim">
+                This will permanently delete all your lending and borrowing records. This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex gap-3 sm:justify-start">
+              <Button variant="ghost" className="rounded-full" onClick={() => {}}>Cancel</Button>
+              <Button 
+                className="bg-status-overdue text-bg hover:bg-status-overdue/90 rounded-full px-8"
+                onClick={clearInventory}
+              >
+                Yes, Clear All
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl" onClick={handleLogout}>
+          <LogOut className="w-5 h-5 mr-2" />
+          Sign Out
+        </Button>
+      </div>
+    </div>
+  </div>
+  );
+};
+
+interface EntryCardProps {
+  entry: BorrowEntry;
+  isLender: boolean;
+  onUpdateStatus: (id: string, status: EntryStatus, extra?: any) => Promise<void>;
+  onAskBack: (tone: string) => Promise<void> | void;
+  currentUserId: string;
+  friends?: Friend[];
+  key?: string;
+}
+
 function EntryCard({ 
   entry, 
   isLender, 
@@ -982,15 +1063,7 @@ function EntryCard({
   onAskBack,
   currentUserId,
   friends = []
-}: { 
-  entry: BorrowEntry, 
-  isLender: boolean, 
-  onUpdateStatus: (id: string, status: EntryStatus, extra?: any) => Promise<void>,
-  onAskBack: (tone: string) => Promise<void> | void,
-  currentUserId: string,
-  friends?: Friend[],
-  key?: string
-}) {
+}: EntryCardProps) {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [partialAmount, setPartialAmount] = useState('');
 
