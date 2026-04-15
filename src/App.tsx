@@ -63,6 +63,7 @@ export default function App() {
   const [entries, setEntries] = useState<BorrowEntry[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [friendSearchQuery, setFriendSearchQuery] = useState('');
   const [isLendDialogOpen, setIsLendDialogOpen] = useState(false);
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -371,57 +372,65 @@ export default function App() {
 
       // If status is RETURNED, update trust score for the borrower
       if (newStatus === 'RETURNED') {
-        const entrySnap = await getDoc(doc(db, 'borrowEntries', entryId));
-        if (entrySnap.exists()) {
-          const entryData = entrySnap.data() as BorrowEntry;
-          const friendsRef = collection(db, 'friends');
-          const q = query(friendsRef, 
-            where('addedBy', '==', entryData.lenderID), 
-            where('email', '==', entryData.borrowerEmail)
-          );
-          const friendSnap = await getDocs(q);
-          
-          if (!friendSnap.empty) {
-            const friendDoc = friendSnap.docs[0];
-            const currentScore = friendDoc.data().trustScore || 5.0;
+        try {
+          const entrySnap = await getDoc(doc(db, 'borrowEntries', entryId));
+          if (entrySnap.exists()) {
+            const entryData = entrySnap.data() as BorrowEntry;
+            const friendsRef = collection(db, 'friends');
+            const q = query(friendsRef, 
+              where('addedBy', '==', entryData.lenderID), 
+              where('email', '==', entryData.borrowerEmail)
+            );
+            const friendSnap = await getDocs(q);
             
-            let adjustment = 0.2; // Base increase for returning
-            
-            // Performance based adjustment
-            if (entryData.returnDate && typeof entryData.returnDate.toDate === 'function') {
-              const dueDate = entryData.returnDate.toDate();
-              if (isAfter(new Date(), dueDate)) {
-                const daysLate = differenceInDays(new Date(), dueDate);
-                adjustment = -Math.min(daysLate * 0.2, 2.5); // Heavier penalty for lateness
+            if (!friendSnap.empty) {
+              const friendDoc = friendSnap.docs[0];
+              const currentScore = friendDoc.data().trustScore || 5.0;
+              
+              let adjustment = 0.2; // Base increase for returning
+              
+              // Performance based adjustment
+              if (entryData.returnDate && typeof entryData.returnDate.toDate === 'function') {
+                const dueDate = entryData.returnDate.toDate();
+                if (isAfter(new Date(), dueDate)) {
+                  const daysLate = differenceInDays(new Date(), dueDate);
+                  adjustment = -Math.min(daysLate * 0.2, 2.5); // Heavier penalty for lateness
+                } else {
+                  // Bonus for early return
+                  const daysEarly = differenceInDays(dueDate, new Date());
+                  if (daysEarly >= 1) adjustment += 0.1;
+                }
+              }
+
+              // Penalty for reminders needed
+              const reminderCount = (entryData as any).reminderCount || 0;
+              if (reminderCount > 0) {
+                adjustment -= reminderCount * 0.15;
+              }
+              
+              const newScore = Math.max(0, Math.min(5, currentScore + adjustment));
+              await updateDoc(friendDoc.ref, { trustScore: newScore });
+              
+              if (adjustment < 0) {
+                toast.error(`Trust score decreased for borrower due to performance.`);
               } else {
-                // Bonus for early return
-                const daysEarly = differenceInDays(dueDate, new Date());
-                if (daysEarly >= 1) adjustment += 0.1;
+                toast.success(`Trust score improved!`);
               }
             }
-
-            // Penalty for reminders needed
-            const reminderCount = (entryData as any).reminderCount || 0;
-            if (reminderCount > 0) {
-              adjustment -= reminderCount * 0.15;
-            }
-            
-            const newScore = Math.max(0, Math.min(5, currentScore + adjustment));
-            await updateDoc(friendDoc.ref, { trustScore: newScore });
-            
-            if (adjustment < 0) {
-              toast.error(`Trust score decreased for borrower due to performance.`);
-            } else {
-              toast.success(`Trust score improved!`);
-            }
           }
+        } catch (scoreError) {
+          console.warn("Trust score update failed (non-critical):", scoreError);
+          // Don't fail the whole operation if just the trust score update fails
         }
       }
 
       toast.success(`Status updated to ${newStatus.toLowerCase().replace('_', ' ')}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Update error:', error);
-      toast.error('Failed to update status');
+      const errorMessage = error?.message?.includes('permission-denied') 
+        ? 'Permission denied. You might not have access to this item.' 
+        : 'Failed to update status. Please try again.';
+      toast.error(errorMessage);
     }
   };
 
@@ -525,12 +534,14 @@ export default function App() {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-slate-50">
+      <div className="min-h-screen bg-bg flex flex-col items-center justify-center p-6 text-center">
         <motion.div 
           animate={{ rotate: 360 }}
-          transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-          className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full"
+          transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
+          className="w-16 h-16 border-4 border-accent border-t-transparent rounded-full mb-6"
         />
+        <h2 className="text-3xl font-serif italic text-accent animate-pulse">BorrowBack</h2>
+        <p className="text-ink-dim mt-2 tracking-widest uppercase text-[10px]">Securing your belongings</p>
       </div>
     );
   }
@@ -585,6 +596,8 @@ export default function App() {
         <SidebarContent 
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
+          friendSearchQuery={friendSearchQuery}
+          setFriendSearchQuery={setFriendSearchQuery}
           lenderIntegrity={lenderIntegrity}
           user={user}
           userBadge={userBadge}
@@ -615,6 +628,8 @@ export default function App() {
               <SidebarContent 
                 searchQuery={searchQuery}
                 setSearchQuery={setSearchQuery}
+                friendSearchQuery={friendSearchQuery}
+                setFriendSearchQuery={setFriendSearchQuery}
                 lenderIntegrity={lenderIntegrity}
                 user={user}
                 userBadge={userBadge}
@@ -636,8 +651,8 @@ export default function App() {
         </div>
         <div className="flex items-center gap-3">
           <Avatar className="w-8 h-8 border border-accent rounded-full">
-            <AvatarImage src={user.photoURL} className="rounded-full" />
-            <AvatarFallback className="rounded-full">{user.name[0]}</AvatarFallback>
+            <AvatarImage src={user?.photoURL || undefined} className="rounded-full" />
+            <AvatarFallback className="rounded-full bg-surface-alt text-accent">{user?.name?.[0] || '?'}</AvatarFallback>
           </Avatar>
         </div>
       </header>
@@ -657,7 +672,7 @@ export default function App() {
           <TabsList className="inline-flex h-14 items-center justify-center rounded-full bg-surface-alt p-1.5 text-ink-dim w-full sm:w-auto mb-10 shadow-inner border border-surface-alt/40">
             <TabsTrigger 
               value="given" 
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-full px-10 py-3 text-sm font-bold transition-all data-[state=active]:bg-bg data-[state=active]:text-accent data-[state=active]:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.12)] active:scale-95"
+              className="flex-1 sm:flex-none inline-flex items-center justify-center whitespace-nowrap rounded-full px-10 py-3 text-sm font-bold transition-all data-[state=active]:bg-bg data-[state=active]:text-accent data-[state=active]:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.12)] active:scale-95"
             >
               Given (Lent)
               {givenEntries.filter(e => e.status === 'RETURN_REQUESTED' && e.returnRequestedBy !== user.uid).length > 0 && (
@@ -666,7 +681,7 @@ export default function App() {
             </TabsTrigger>
             <TabsTrigger 
               value="taken" 
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-full px-10 py-3 text-sm font-bold transition-all data-[state=active]:bg-bg data-[state=active]:text-accent data-[state=active]:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.12)] active:scale-95"
+              className="flex-1 sm:flex-none inline-flex items-center justify-center whitespace-nowrap rounded-full px-10 py-3 text-sm font-bold transition-all data-[state=active]:bg-bg data-[state=active]:text-accent data-[state=active]:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.12)] active:scale-95"
             >
               Taken (Borrowed)
               {takenEntries.filter(e => e.status === 'REQUESTED').length > 0 && (
@@ -678,7 +693,21 @@ export default function App() {
           <TabsContent value="given" className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <AnimatePresence mode="popLayout">
               {givenEntries.length === 0 ? (
-                <div className="col-span-full py-20 text-center text-ink-dim">You haven't lent anything yet.</div>
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="col-span-full py-32 flex flex-col items-center justify-center text-center space-y-4"
+                >
+                  <div className="w-16 h-16 bg-surface-alt rounded-full flex items-center justify-center text-accent/40">
+                    <ArrowUpRight className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-xl font-medium text-ink">Nothing lent yet</h3>
+                    <p className="text-sm text-ink-dim max-w-xs mx-auto">
+                      Start tracking your items by clicking the plus button below.
+                    </p>
+                  </div>
+                </motion.div>
               ) : (
                 givenEntries.map(entry => (
                   <EntryCard 
@@ -698,7 +727,21 @@ export default function App() {
           <TabsContent value="taken" className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <AnimatePresence mode="popLayout">
               {takenEntries.length === 0 ? (
-                <div className="col-span-full py-20 text-center text-ink-dim">You haven't borrowed anything yet.</div>
+                <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="col-span-full py-32 flex flex-col items-center justify-center text-center space-y-4"
+                >
+                  <div className="w-16 h-16 bg-surface-alt rounded-full flex items-center justify-center text-accent/40">
+                    <Users className="w-8 h-8" />
+                  </div>
+                  <div className="space-y-1">
+                    <h3 className="text-xl font-medium text-ink">Nothing borrowed yet</h3>
+                    <p className="text-sm text-ink-dim max-w-xs mx-auto">
+                      Items shared with you will appear here automatically.
+                    </p>
+                  </div>
+                </motion.div>
               ) : (
                 takenEntries.map(entry => (
                   <EntryCard 
@@ -847,6 +890,16 @@ export default function App() {
                 </PopoverContent>
               </Popover>
             </div>
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-widest text-ink-dim">Notes (Optional)</Label>
+              <Input 
+                placeholder="e.g. Please handle with care" 
+                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                value={newNotes}
+                onChange={(e) => setNewNotes(e.target.value)}
+              />
+            </div>
+
             <DialogFooter>
               <Button type="submit" className="w-full h-14 bg-accent text-bg hover:bg-accent/90 rounded-full font-semibold border-none active:scale-95 transition-all" disabled={isSubmitting}>
                 {isSubmitting ? "Processing..." : "Confirm Loan"}
@@ -862,6 +915,8 @@ export default function App() {
 interface SidebarContentProps {
   searchQuery: string;
   setSearchQuery: (val: string) => void;
+  friendSearchQuery: string;
+  setFriendSearchQuery: (val: string) => void;
   lenderIntegrity: number;
   user: UserProfile | null;
   userBadge: { label: string, color: string } | null;
@@ -881,6 +936,8 @@ interface SidebarContentProps {
 const SidebarContent = ({
   searchQuery,
   setSearchQuery,
+  friendSearchQuery,
+  setFriendSearchQuery,
   lenderIntegrity,
   user,
   userBadge,
@@ -959,8 +1016,10 @@ const SidebarContent = ({
                 </DialogHeader>
                 <form onSubmit={handleAddFriend} className="space-y-6 py-4">
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase tracking-widest text-ink-dim">Name</Label>
+                    <Label htmlFor="friend-name" className="text-xs uppercase tracking-widest text-ink-dim">Name</Label>
                     <Input 
+                      id="friend-name"
+                      name="friend-name"
                       placeholder="Friend's Name" 
                       className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
                       value={friendName}
@@ -969,8 +1028,10 @@ const SidebarContent = ({
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label className="text-xs uppercase tracking-widest text-ink-dim">Email</Label>
+                    <Label htmlFor="friend-email" className="text-xs uppercase tracking-widest text-ink-dim">Email</Label>
                     <Input 
+                      id="friend-email"
+                      name="friend-email"
                       type="email"
                       placeholder="friend@example.com" 
                       className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
@@ -986,11 +1047,26 @@ const SidebarContent = ({
               </DialogContent>
             </Dialog>
           </div>
+          
+          {friends.length > 5 && (
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-dim w-3 h-3" />
+              <Input 
+                placeholder="Search friends..." 
+                className="pl-8 h-8 bg-surface-alt border-none rounded-lg text-xs text-ink placeholder:text-ink-dim focus-visible:ring-1 focus-visible:ring-accent"
+                value={friendSearchQuery}
+                onChange={(e) => setFriendSearchQuery(e.target.value)}
+              />
+            </div>
+          )}
+
           <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
             {friends.length === 0 ? (
               <div className="text-xs text-ink-dim italic">No friends added yet.</div>
             ) : (
-              friends.map(friend => (
+              friends
+                .filter(f => f.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) || f.email.toLowerCase().includes(friendSearchQuery.toLowerCase()))
+                .map(friend => (
                 <div key={friend.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-surface-alt transition-colors group">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 bg-accent/10 rounded-full flex items-center justify-center text-[10px] text-accent font-bold">
@@ -1118,6 +1194,7 @@ function EntryCard({
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95 }}
+        whileHover={{ scale: 1.01, y: -2 }}
         whileTap={{ scale: 0.98 }}
         onClick={() => setIsDetailOpen(true)}
         className="cursor-pointer"
