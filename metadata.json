@@ -1,0 +1,6 @@
+{
+  "name": "BorrowBack",
+  "description": "A shared accountability system to track items or money lent to friends with real-time reminders.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

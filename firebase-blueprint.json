@@ -1,0 +1,50 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "A user of the BorrowBack app.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "photoURL": { "type": "string", "format": "uri" }
+      },
+      "required": ["uid", "name", "email"]
+    },
+    "BorrowEntry": {
+      "title": "BorrowEntry",
+      "description": "A record of an item lent or borrowed.",
+      "type": "object",
+      "properties": {
+        "itemName": { "type": "string" },
+        "lenderID": { "type": "string" },
+        "borrowerID": { "type": "string" },
+        "lenderEmail": { "type": "string" },
+        "borrowerEmail": { "type": "string" },
+        "lenderName": { "type": "string" },
+        "borrowerName": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["REQUESTED", "ACTIVE", "RETURN_REQUESTED", "RETURNED", "CANCELLED"]
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "returnDate": { "type": "string", "format": "date-time" },
+        "notes": { "type": "string" },
+        "returnRequestedBy": { "type": "string" },
+        "lastReminderSentAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["itemName", "lenderID", "borrowerEmail", "status", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles."
+    },
+    "/borrowEntries/{entryId}": {
+      "schema": "BorrowEntry",
+      "description": "Lending records."
+    }
+  }
+}
