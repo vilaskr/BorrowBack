@@ -669,30 +669,24 @@ export default function App() {
         </div>
 
         <Tabs defaultValue="given" className="w-full">
-          <TabsList className="inline-flex h-auto items-center justify-center rounded-[28px] bg-surface-alt/40 p-2 text-ink-dim w-full sm:w-auto mb-12 shadow-2xl border border-surface-alt/20 backdrop-blur-2xl">
+          <TabsList className="w-full flex items-center justify-center rounded-full bg-gray-800/60 backdrop-blur-md p-1 mb-10 border-none">
             <TabsTrigger 
               value="given" 
-              className="flex-1 sm:flex-none inline-flex items-center justify-center whitespace-nowrap rounded-[22px] px-12 py-4 text-sm font-black uppercase tracking-[0.1em] transition-all duration-300 hover:bg-surface-alt/60 hover:text-ink hover:-translate-y-1 hover:shadow-lg data-[state=active]:bg-gradient-to-b data-[state=active]:from-bg data-[state=active]:to-surface-alt data-[state=active]:text-accent data-[state=active]:shadow-[0_15px_30px_-10px_rgba(0,0,0,0.2)] data-[state=active]:scale-105 active:scale-95 border-2 border-transparent data-[state=active]:border-accent/20 relative overflow-hidden group"
+              className="flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-full py-2.5 text-sm transition-all duration-200 text-gray-400 data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:font-semibold data-[state=active]:shadow-md"
             >
-              <span className="relative z-10 flex items-center">
-                Given (Lent)
-                {givenEntries.filter(e => e.status === 'RETURN_REQUESTED' && e.returnRequestedBy !== user.uid).length > 0 && (
-                  <span className="ml-2 w-2 h-2 bg-accent rounded-full animate-pulse shadow-[0_0_8px_rgba(var(--accent),0.5)]" />
-                )}
-              </span>
-              <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent opacity-0 group-data-[state=active]:opacity-100 transition-opacity" />
+              Given (Lent)
+              {givenEntries.filter(e => e.status === 'RETURN_REQUESTED' && e.returnRequestedBy !== user.uid).length > 0 && (
+                <span className="ml-2 w-2 h-2 bg-accent rounded-full animate-pulse" />
+              )}
             </TabsTrigger>
             <TabsTrigger 
               value="taken" 
-              className="flex-1 sm:flex-none inline-flex items-center justify-center whitespace-nowrap rounded-[22px] px-12 py-4 text-sm font-black uppercase tracking-[0.1em] transition-all duration-300 hover:bg-surface-alt/60 hover:text-ink hover:-translate-y-1 hover:shadow-lg data-[state=active]:bg-gradient-to-b data-[state=active]:from-bg data-[state=active]:to-surface-alt data-[state=active]:text-accent data-[state=active]:shadow-[0_15px_30px_-10px_rgba(0,0,0,0.2)] data-[state=active]:scale-105 active:scale-95 border-2 border-transparent data-[state=active]:border-accent/20 relative overflow-hidden group"
+              className="flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-full py-2.5 text-sm transition-all duration-200 text-gray-400 data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:font-semibold data-[state=active]:shadow-md"
             >
-              <span className="relative z-10 flex items-center">
-                Taken (Borrowed)
-                {takenEntries.filter(e => e.status === 'REQUESTED').length > 0 && (
-                  <span className="ml-2 w-2 h-2 bg-accent rounded-full animate-pulse shadow-[0_0_8px_rgba(var(--accent),0.5)]" />
-                )}
-              </span>
-              <div className="absolute inset-0 bg-gradient-to-tr from-white/10 to-transparent opacity-0 group-data-[state=active]:opacity-100 transition-opacity" />
+              Taken (Borrowed)
+              {takenEntries.filter(e => e.status === 'REQUESTED').length > 0 && (
+                <span className="ml-2 w-2 h-2 bg-accent rounded-full animate-pulse" />
+              )}
             </TabsTrigger>
           </TabsList>
 
