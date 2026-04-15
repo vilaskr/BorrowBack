@@ -197,7 +197,7 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
-      const newEntry: Omit<BorrowEntry, 'id'> = {
+      const newEntry: any = {
         itemName: newItemName,
         lenderID: user.uid,
         lenderEmail: user.email,
@@ -209,9 +209,12 @@ export default function App() {
         notes: newNotes,
         returnDate: newReturnDate ? Timestamp.fromDate(newReturnDate) : null,
         isMonetary: isMonetary,
-        totalAmount: isMonetary ? parseFloat(totalAmount) : undefined,
-        returnedAmount: isMonetary ? 0 : undefined,
       };
+
+      if (isMonetary) {
+        newEntry.totalAmount = parseFloat(totalAmount) || 0;
+        newEntry.returnedAmount = 0;
+      }
 
       await addDoc(collection(db, 'borrowEntries'), newEntry);
       toast.success('Lend request sent!');
