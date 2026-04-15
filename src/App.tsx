@@ -67,6 +67,48 @@ export default function App() {
 
   // Track seen reminders to avoid duplicate toasts
   const seenReminders = React.useRef<Set<string>>(new Set());
+  const notificationSound = React.useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    notificationSound.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    
+    // Request notification permission
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  }, []);
+
+  const sendEmailNotification = async (email: string, subject: string, message: string) => {
+    try {
+      await fetch('/api/notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, subject, message }),
+      });
+    } catch (error) {
+      console.error("Failed to send email notification:", error);
+    }
+  };
+
+  const triggerNotification = (title: string, body: string) => {
+    // Play sound
+    notificationSound.current?.play().catch(e => console.log("Sound play blocked by browser"));
+
+    // System notification
+    if ("Notification" in window && Notification.permission === "granted") {
+      new Notification(title, {
+        body,
+        icon: '/favicon.ico'
+      });
+    }
+
+    // Toast
+    toast.message(title, {
+      description: body,
+      icon: <MessageCircle className="w-5 h-5 text-accent" />,
+      duration: 5000,
+    });
+  };
 
   // Form state for new entry
   const [newItemName, setNewItemName] = useState('');
@@ -156,13 +198,12 @@ export default function App() {
           const reminderTime = entry.lastReminderSentAt.toDate().getTime();
           const now = Date.now();
           
-          // If reminder was sent in the last 30 seconds, show a toast
+          // If reminder was sent in the last 30 seconds, show a notification
           if (now - reminderTime < 30000) {
-            toast.message(`Reminder from ${entry.lenderName}`, {
-              description: `They are asking about the "${entry.itemName}".`,
-              icon: <MessageCircle className="w-5 h-5 text-accent" />,
-              duration: 5000,
-            });
+            triggerNotification(
+              `Reminder from ${entry.lenderName}`,
+              `They are asking about the "${entry.itemName}".`
+            );
             seenReminders.current.add(reminderId);
           }
         }
@@ -317,9 +358,16 @@ export default function App() {
       strict: `Hi, I need the ${entry.itemName} back as soon as possible. 😐`
     };
 
-    toast.info(`Reminder sent: "${messages[tone]}"`);
+    const message = messages[tone];
+    toast.info(`Reminder sent: "${message}"`);
     
-    // In a real app, this would trigger a push notification or email
+    // Send email notification via backend
+    sendEmailNotification(
+      entry.borrowerEmail,
+      `BorrowBack Reminder: ${entry.itemName}`,
+      message
+    );
+    
     await updateDoc(doc(db, 'borrowEntries', entry.id), {
       lastReminderSentAt: serverTimestamp()
     });
@@ -938,7 +986,7 @@ function EntryCard({
 
       <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
         <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl max-w-md">
-          <DialogHeader>
+          <DialogHeader className="pr-10">
             <div className="flex justify-between items-start mb-2">
               <Badge className={cn("text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full border", config.color)}>
                 {config.label}
