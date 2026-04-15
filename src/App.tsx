@@ -73,8 +73,12 @@ export default function App() {
     notificationSound.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
     
     // Request notification permission
-    if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
+    if (typeof window !== 'undefined' && "Notification" in window && Notification.permission === "default") {
+      try {
+        Notification.requestPermission?.();
+      } catch (e) {
+        console.warn("Notification.requestPermission failed:", e);
+      }
     }
   }, []);
 
@@ -91,23 +95,37 @@ export default function App() {
   };
 
   const triggerNotification = (title: string, body: string) => {
-    // Play sound
-    notificationSound.current?.play().catch(e => console.log("Sound play blocked by browser"));
+    try {
+      // Play sound
+      if (notificationSound.current) {
+        notificationSound.current.play().catch(e => {
+          console.warn("Sound play blocked or failed:", e);
+        });
+      }
 
-    // System notification
-    if ("Notification" in window && Notification.permission === "granted") {
-      new Notification(title, {
-        body,
-        icon: '/favicon.ico'
+      // System notification
+      if (typeof window !== 'undefined' && "Notification" in window) {
+        try {
+          if (Notification.permission === "granted" && typeof Notification === 'function') {
+            new Notification(title, {
+              body,
+              icon: '/favicon.ico'
+            });
+          }
+        } catch (e) {
+          console.warn("System notification failed:", e);
+        }
+      }
+
+      // Toast
+      toast.message(title, {
+        description: body,
+        icon: <MessageCircle className="w-5 h-5 text-accent" />,
+        duration: 5000,
       });
+    } catch (error) {
+      console.error("Error in triggerNotification:", error);
     }
-
-    // Toast
-    toast.message(title, {
-      description: body,
-      icon: <MessageCircle className="w-5 h-5 text-accent" />,
-      duration: 5000,
-    });
   };
 
   // Form state for new entry
@@ -190,25 +208,31 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
     
-    const borrowerEntries = entries.filter(e => e.borrowerEmail === user.email && e.status === 'ACTIVE');
-    borrowerEntries.forEach(entry => {
-      if (entry.lastReminderSentAt) {
-        const reminderId = `${entry.id}_${entry.lastReminderSentAt.seconds}`;
-        if (!seenReminders.current.has(reminderId)) {
-          const reminderTime = entry.lastReminderSentAt.toDate().getTime();
-          const now = Date.now();
+    try {
+      const borrowerEntries = entries.filter(e => e.borrowerEmail === user.email && e.status === 'ACTIVE');
+      borrowerEntries.forEach(entry => {
+        if (entry.lastReminderSentAt && typeof entry.lastReminderSentAt.toDate === 'function') {
+          const seconds = entry.lastReminderSentAt.seconds || 0;
+          const reminderId = `${entry.id}_${seconds}`;
           
-          // If reminder was sent in the last 30 seconds, show a notification
-          if (now - reminderTime < 30000) {
-            triggerNotification(
-              `Reminder from ${entry.lenderName}`,
-              `They are asking about the "${entry.itemName}".`
-            );
-            seenReminders.current.add(reminderId);
+          if (!seenReminders.current.has(reminderId)) {
+            const reminderTime = entry.lastReminderSentAt.toDate().getTime();
+            const now = Date.now();
+            
+            // If reminder was sent in the last 30 seconds, show a notification
+            if (now - reminderTime < 30000) {
+              triggerNotification(
+                `Reminder from ${entry.lenderName}`,
+                `They are asking about the "${entry.itemName}".`
+              );
+              seenReminders.current.add(reminderId);
+            }
           }
         }
-      }
-    });
+      });
+    } catch (error) {
+      console.error("Error in notification effect:", error);
+    }
   }, [entries, user]);
 
   const handleLogin = async () => {
