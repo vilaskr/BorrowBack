@@ -773,24 +773,38 @@ export default function App() {
 
         <Tabs defaultValue="given" className="w-full">
           <TabsList className="w-full flex items-center justify-center rounded-full bg-gray-800/60 backdrop-blur-md p-1 mb-10 border-none">
-            <TabsTrigger 
-              value="given" 
-              className="flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-full py-2.5 text-sm transition-all duration-200 text-gray-400 data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:font-semibold data-[state=active]:shadow-md"
-            >
-              Given (Lent)
-              {givenEntries.filter(e => e.status === 'RETURN_REQUESTED' && e.returnRequestedBy !== user.uid).length > 0 && (
-                <span className="ml-2 w-2 h-2 bg-accent rounded-full animate-pulse" />
-              )}
-            </TabsTrigger>
-            <TabsTrigger 
-              value="taken" 
-              className="flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-full py-2.5 text-sm transition-all duration-200 text-gray-400 data-[state=active]:bg-white data-[state=active]:text-black data-[state=active]:font-semibold data-[state=active]:shadow-md"
-            >
-              Taken (Borrowed)
-              {takenEntries.filter(e => e.status === 'REQUESTED').length > 0 && (
-                <span className="ml-2 w-2 h-2 bg-accent rounded-full animate-pulse" />
-              )}
-            </TabsTrigger>
+            <TabsTrigger
+  value="given"
+  className="
+    flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-full py-2.5 text-sm transition-all duration-200
+    
+    text-gray-400 hover:text-white hover:bg-white/10
+    
+    data-[state=active]:bg-white 
+    data-[state=active]:text-black 
+    data-[state=active]:font-semibold
+    data-[state=active]:hover:bg-white
+    data-[state=active]:hover:text-black
+  "
+>
+  Given (Lent)
+</TabsTrigger>
+            <TabsTrigger
+  value="taken"
+  className="
+    flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-full py-2.5 text-sm transition-all duration-200
+    
+    text-gray-400 hover:text-white hover:bg-white/10
+    
+    data-[state=active]:bg-white 
+    data-[state=active]:text-black 
+    data-[state=active]:font-semibold
+    data-[state=active]:hover:bg-white
+    data-[state=active]:hover:text-black
+  "
+>
+  Taken (Borrowed)
+</TabsTrigger>
           </TabsList>
 
           <TabsContent value="given" className="grid grid-cols-1 md:grid-cols-2 gap-5">
