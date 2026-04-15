@@ -22,7 +22,9 @@ import {
   serverTimestamp,
   addDoc,
   updateDoc,
-  Timestamp
+  Timestamp,
+  writeBatch,
+  deleteDoc
 } from './firebase';
 import { UserProfile, BorrowEntry, EntryStatus } from './types';
 import { Button } from '@/components/ui/button';
@@ -46,7 +48,8 @@ import {
   MessageCircle,
   AlertCircle,
   CheckCircle2,
-  Trophy
+  Trophy,
+  Trash2
 } from 'lucide-react';
 import { format, formatDistanceToNow, isAfter, differenceInDays } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
@@ -94,14 +97,17 @@ export default function App() {
     }
   };
 
-  const triggerNotification = (title: string, body: string) => {
+  const triggerNotification = (title: string, body: string, tone: 'friendly' | 'casual' | 'strict' = 'friendly') => {
     try {
-      // Play sound
-      if (notificationSound.current) {
-        notificationSound.current.play().catch(e => {
-          console.warn("Sound play blocked or failed:", e);
-        });
-      }
+      // Play sound based on tone
+      const sounds = {
+        friendly: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3', // Soft chime
+        casual: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3', // Pop/Bubble
+        strict: 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3' // Alert/Beep
+      };
+
+      const audio = new Audio(sounds[tone]);
+      audio.play().catch(e => console.warn("Sound play blocked:", e));
 
       // System notification
       if (typeof window !== 'undefined' && "Notification" in window) {
@@ -120,7 +126,10 @@ export default function App() {
       // Toast
       toast.message(title, {
         description: body,
-        icon: <MessageCircle className="w-5 h-5 text-accent" />,
+        icon: <MessageCircle className={cn("w-5 h-5", 
+          tone === 'strict' ? "text-status-overdue" : 
+          tone === 'casual' ? "text-orange-500" : "text-accent"
+        )} />,
         duration: 5000,
       });
     } catch (error) {
@@ -221,9 +230,17 @@ export default function App() {
             
             // If reminder was sent in the last 30 seconds, show a notification
             if (now - reminderTime < 30000) {
+              const tone = entry.lastReminderTone || 'friendly';
+              const messages: Record<string, string> = {
+                friendly: `They sent a friendly nudge about "${entry.itemName}".`,
+                casual: `Just checking in on the "${entry.itemName}".`,
+                strict: `URGENT: Return requested for "${entry.itemName}".`
+              };
+
               triggerNotification(
                 `Reminder from ${entry.lenderName}`,
-                `They are asking about the "${entry.itemName}".`
+                messages[tone],
+                tone
               );
               seenReminders.current.add(reminderId);
             }
@@ -353,17 +370,35 @@ export default function App() {
             const friendDoc = friendSnap.docs[0];
             const currentScore = friendDoc.data().trustScore || 5.0;
             
-            let penalty = 0;
-            if (entryData.returnDate) {
+            let adjustment = 0.2; // Base increase for returning
+            
+            // Performance based adjustment
+            if (entryData.returnDate && typeof entryData.returnDate.toDate === 'function') {
               const dueDate = entryData.returnDate.toDate();
               if (isAfter(new Date(), dueDate)) {
                 const daysLate = differenceInDays(new Date(), dueDate);
-                penalty = Math.min(daysLate * 0.1, 2.0);
+                adjustment = -Math.min(daysLate * 0.2, 2.5); // Heavier penalty for lateness
+              } else {
+                // Bonus for early return
+                const daysEarly = differenceInDays(dueDate, new Date());
+                if (daysEarly >= 1) adjustment += 0.1;
               }
             }
+
+            // Penalty for reminders needed
+            const reminderCount = (entryData as any).reminderCount || 0;
+            if (reminderCount > 0) {
+              adjustment -= reminderCount * 0.15;
+            }
             
-            const newScore = Math.max(0, Math.min(5, currentScore + (penalty > 0 ? -penalty : 0.2)));
+            const newScore = Math.max(0, Math.min(5, currentScore + adjustment));
             await updateDoc(friendDoc.ref, { trustScore: newScore });
+            
+            if (adjustment < 0) {
+              toast.error(`Trust score decreased for borrower due to performance.`);
+            } else {
+              toast.success(`Trust score improved!`);
+            }
           }
         }
       }
@@ -372,6 +407,31 @@ export default function App() {
     } catch (error) {
       console.error('Update error:', error);
       toast.error('Failed to update status');
+    }
+  };
+
+  const clearInventory = async () => {
+    if (!user) return;
+    
+    try {
+      const myLent = entries.filter(e => e.lenderID === user.uid);
+      const myBorrowed = entries.filter(e => e.borrowerEmail === user.email);
+      const allToDelete = [...myLent, ...myBorrowed];
+      
+      if (allToDelete.length === 0) {
+        toast.info("Inventory is already empty");
+        return;
+      }
+
+      const batch = writeBatch(db);
+      allToDelete.forEach(entry => {
+        batch.delete(doc(db, 'borrowEntries', entry.id));
+      });
+      await batch.commit();
+      toast.success("Inventory cleared successfully");
+    } catch (error) {
+      console.error("Clear inventory error:", error);
+      toast.error("Failed to clear inventory");
     }
   };
 
@@ -393,7 +453,9 @@ export default function App() {
     );
     
     await updateDoc(doc(db, 'borrowEntries', entry.id), {
-      lastReminderSentAt: serverTimestamp()
+      lastReminderSentAt: serverTimestamp(),
+      lastReminderTone: tone,
+      reminderCount: (entry as any).reminderCount ? (entry as any).reminderCount + 1 : 1
     });
   };
 
@@ -554,10 +616,38 @@ export default function App() {
         </div>
       </div>
 
-      <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl mt-8" onClick={handleLogout}>
-        <LogOut className="w-5 h-5 mr-2" />
-        Sign Out
-      </Button>
+      <div className="flex flex-col gap-2 mt-8">
+        <Dialog>
+          <DialogTrigger render={
+            <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl">
+              <Trash2 className="w-5 h-5 mr-2" />
+              Clear Inventory
+            </Button>
+          } />
+          <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
+            <DialogHeader>
+              <DialogTitle className="text-xl font-serif italic text-status-overdue">Clear All Data?</DialogTitle>
+              <DialogDescription className="text-ink-dim">
+                This will permanently delete all your lending and borrowing records. This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="flex gap-3 sm:justify-start">
+              <Button variant="ghost" className="rounded-full" onClick={() => {}}>Cancel</Button>
+              <Button 
+                className="bg-status-overdue text-bg hover:bg-status-overdue/90 rounded-full px-8"
+                onClick={clearInventory}
+              >
+                Yes, Clear All
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        <Button variant="ghost" className="justify-start text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-xl" onClick={handleLogout}>
+          <LogOut className="w-5 h-5 mr-2" />
+          Sign Out
+        </Button>
+      </div>
     </div>
   );
 

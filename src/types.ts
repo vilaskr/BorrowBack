@@ -15,6 +15,8 @@ export interface BorrowEntry {
   notes?: string;
   returnRequestedBy?: string;
   lastReminderSentAt?: any; // Firestore Timestamp
+  lastReminderTone?: 'friendly' | 'casual' | 'strict';
+  reminderCount?: number;
   totalAmount?: number; // For partial returns
   returnedAmount?: number; // For partial returns
   isMonetary?: boolean;
