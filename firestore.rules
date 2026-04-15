@@ -32,6 +32,16 @@ service cloud.firestore {
     //
     // ===============================================================
 
+    // Collection: friends
+    // Document ID: {friendId}
+    // Fields:
+    //   - name: string (required)
+    //   - email: string (required)
+    //   - addedBy: string (required)
+    //   - trustScore: number (optional)
+    //
+    // ===============================================================
+
     // ===============================================================
     // Helper Functions
     // ===============================================================
@@ -67,6 +77,13 @@ service cloud.firestore {
              data.status in ['REQUESTED', 'ACTIVE', 'RETURN_REQUESTED', 'RETURNED', 'CANCELLED'];
     }
 
+    function isValidFriend(data) {
+      return data.keys().hasAll(['name', 'email', 'addedBy']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$") &&
+             data.addedBy == request.auth.uid;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -89,6 +106,13 @@ service cloud.firestore {
                       isValidBorrowEntry(request.resource.data);
       
       allow delete: if false; // We don't delete, we cancel or return
+    }
+
+    match /friends/{friendId} {
+      allow read: if isAuthenticated() && resource.data.addedBy == request.auth.uid;
+      allow create: if isAuthenticated() && isValidFriend(request.resource.data);
+      allow update: if isAuthenticated() && resource.data.addedBy == request.auth.uid && isValidFriend(request.resource.data);
+      allow delete: if isAuthenticated() && resource.data.addedBy == request.auth.uid;
     }
   }
 }

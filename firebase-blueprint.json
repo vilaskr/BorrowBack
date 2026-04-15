@@ -32,9 +32,24 @@
         "returnDate": { "type": "string", "format": "date-time" },
         "notes": { "type": "string" },
         "returnRequestedBy": { "type": "string" },
-        "lastReminderSentAt": { "type": "string", "format": "date-time" }
+        "lastReminderSentAt": { "type": "string", "format": "date-time" },
+        "totalAmount": { "type": "number" },
+        "returnedAmount": { "type": "number" },
+        "isMonetary": { "type": "boolean" }
       },
       "required": ["itemName", "lenderID", "borrowerEmail", "status", "createdAt"]
+    },
+    "Friend": {
+      "title": "Friend",
+      "description": "A saved friend for quick lending.",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "addedBy": { "type": "string" },
+        "trustScore": { "type": "number" }
+      },
+      "required": ["name", "email", "addedBy"]
     }
   },
   "firestore": {
@@ -45,6 +60,10 @@
     "/borrowEntries/{entryId}": {
       "schema": "BorrowEntry",
       "description": "Lending records."
+    },
+    "/friends/{friendId}": {
+      "schema": "Friend",
+      "description": "User's saved friends."
     }
   }
 }

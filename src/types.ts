@@ -15,6 +15,17 @@ export interface BorrowEntry {
   notes?: string;
   returnRequestedBy?: string;
   lastReminderSentAt?: any; // Firestore Timestamp
+  totalAmount?: number; // For partial returns
+  returnedAmount?: number; // For partial returns
+  isMonetary?: boolean;
+}
+
+export interface Friend {
+  id: string;
+  name: string;
+  email: string;
+  addedBy: string;
+  trustScore?: number; // 0-5
 }
 
 export interface UserProfile {
@@ -22,4 +33,5 @@ export interface UserProfile {
   name: string;
   email: string;
   photoURL?: string;
+  badges?: string[];
 }

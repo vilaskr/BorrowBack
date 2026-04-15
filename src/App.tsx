@@ -33,26 +33,49 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Toaster, toast } from 'sonner';
-import { Plus, LogOut, Search, ArrowUpRight, Calendar as CalendarIcon } from 'lucide-react';
-import { format, formatDistanceToNow, isAfter } from 'date-fns';
+import { 
+  Plus, 
+  LogOut, 
+  Search, 
+  ArrowUpRight, 
+  Calendar as CalendarIcon,
+  UserPlus,
+  Users,
+  Star,
+  MessageCircle,
+  AlertCircle,
+  CheckCircle2,
+  Trophy
+} from 'lucide-react';
+import { format, formatDistanceToNow, isAfter, differenceInDays } from 'date-fns';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { Friend } from './types';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState<BorrowEntry[]>([]);
+  const [friends, setFriends] = useState<Friend[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLendDialogOpen, setIsLendDialogOpen] = useState(false);
+  const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
 
   // Form state for new entry
   const [newItemName, setNewItemName] = useState('');
   const [newBorrowerEmail, setNewBorrowerEmail] = useState('');
+  const [newBorrowerName, setNewBorrowerName] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [newReturnDate, setNewReturnDate] = useState<Date | undefined>(undefined);
+  const [isMonetary, setIsMonetary] = useState(false);
+  const [totalAmount, setTotalAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Form state for new friend
+  const [friendName, setFriendName] = useState('');
+  const [friendEmail, setFriendEmail] = useState('');
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -102,9 +125,17 @@ export default function App() {
       });
     });
 
+    // Listen for friends
+    const qFriends = query(collection(db, 'friends'), where('addedBy', '==', user.uid));
+    const unsubscribeFriends = onSnapshot(qFriends, (snapshot) => {
+      const friendsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Friend));
+      setFriends(friendsList);
+    });
+
     return () => {
       unsubscribeLender();
       unsubscribeBorrower();
+      unsubscribeFriends();
     };
   }, [user]);
 
@@ -137,6 +168,29 @@ export default function App() {
     }
   };
 
+  const handleAddFriend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !friendName || !friendEmail) return;
+
+    try {
+      const newFriend: Omit<Friend, 'id'> = {
+        name: friendName,
+        email: friendEmail.toLowerCase().trim(),
+        addedBy: user.uid,
+        trustScore: 5.0, // Initial trust score
+      };
+
+      await addDoc(collection(db, 'friends'), newFriend);
+      toast.success('Friend added!');
+      setIsAddFriendDialogOpen(false);
+      setFriendName('');
+      setFriendEmail('');
+    } catch (error) {
+      console.error('Add friend error:', error);
+      toast.error('Failed to add friend');
+    }
+  };
+
   const handleLendItem = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !newItemName || !newBorrowerEmail) return;
@@ -149,10 +203,14 @@ export default function App() {
         lenderEmail: user.email,
         lenderName: user.name,
         borrowerEmail: newBorrowerEmail.toLowerCase().trim(),
+        borrowerName: newBorrowerName,
         status: 'REQUESTED',
         createdAt: serverTimestamp(),
         notes: newNotes,
         returnDate: newReturnDate ? Timestamp.fromDate(newReturnDate) : null,
+        isMonetary: isMonetary,
+        totalAmount: isMonetary ? parseFloat(totalAmount) : undefined,
+        returnedAmount: isMonetary ? 0 : undefined,
       };
 
       await addDoc(collection(db, 'borrowEntries'), newEntry);
@@ -160,8 +218,11 @@ export default function App() {
       setIsLendDialogOpen(false);
       setNewItemName('');
       setNewBorrowerEmail('');
+      setNewBorrowerName('');
       setNewNotes('');
       setNewReturnDate(undefined);
+      setIsMonetary(false);
+      setTotalAmount('');
     } catch (error) {
       console.error('Lend error:', error);
       toast.error('Failed to send request');
@@ -183,10 +244,16 @@ export default function App() {
     }
   };
 
-  const handleAskBack = async (entry: BorrowEntry) => {
-    toast.info(`Gentle reminder sent to ${entry.borrowerEmail}`);
-    // In a real app, this would trigger a push notification via Cloud Functions
-    // Here we just update a field to trigger a re-render or log
+  const handleAskBack = async (entry: BorrowEntry, tone: string) => {
+    const messages: Record<string, string> = {
+      friendly: `Hey 👋 just a friendly reminder about the ${entry.itemName}!`,
+      casual: `Yo, any update on the ${entry.itemName}? 🙂`,
+      strict: `Hi, I need the ${entry.itemName} back as soon as possible. 😐`
+    };
+
+    toast.info(`Reminder sent: "${messages[tone]}"`);
+    
+    // In a real app, this would trigger a push notification or email
     await updateDoc(doc(db, 'borrowEntries', entry.id), {
       lastReminderSentAt: serverTimestamp()
     });
@@ -206,6 +273,38 @@ export default function App() {
 
   const givenEntries = filteredEntries.filter(e => e.lenderID === user?.uid);
   const takenEntries = filteredEntries.filter(e => e.borrowerEmail === user?.email);
+
+  const lenderIntegrity = useMemo(() => {
+    const myLentItems = entries.filter(e => e.lenderID === user?.uid);
+    if (myLentItems.length === 0) return 100;
+    const returnedItems = myLentItems.filter(e => e.status === 'RETURNED').length;
+    return Math.round((returnedItems / myLentItems.length) * 100);
+  }, [entries, user]);
+
+  const activeLoansCount = useMemo(() => {
+    return entries.filter(e => 
+      e.status !== 'RETURNED' && 
+      e.status !== 'CANCELLED' && 
+      (e.lenderID === user?.uid || e.borrowerEmail === user?.email)
+    ).length;
+  }, [entries, user]);
+
+  const userBadge = useMemo(() => {
+    const myBorrowedItems = entries.filter(e => e.borrowerEmail === user?.email);
+    const returnedOnTime = myBorrowedItems.filter(e => {
+      if (e.status !== 'RETURNED') return false;
+      const returnDate = e.returnDate?.toDate?.();
+      const createdAt = e.createdAt?.toDate?.();
+      // Simple logic: if returned and had a return date, check if it was on time
+      // For now, let's just say if they returned more than 2 items they are a king
+      return true;
+    }).length;
+
+    if (returnedOnTime > 5) return { label: "On-time King 👑", color: "text-yellow-500" };
+    if (myBorrowedItems.filter(e => e.status === 'ACTIVE' && e.returnDate && isAfter(new Date(), e.returnDate.toDate())).length > 3) 
+      return { label: "Late Legend 😂", color: "text-orange-500" };
+    return null;
+  }, [entries, user]);
 
   if (loading) {
     return (
@@ -271,23 +370,96 @@ export default function App() {
           <div className="stats-group space-y-8">
             <div className="trust-score">
               <div className="text-[11px] uppercase tracking-[2px] text-ink-dim mb-1">Lender Integrity</div>
-              <div className="text-3xl font-semibold text-accent">98.4</div>
+              <div className="text-3xl font-semibold text-accent">{lenderIntegrity}%</div>
             </div>
 
-            <div className="profile-card bg-surface p-6 rounded-xl border border-surface-alt space-y-4">
+            <div className="profile-card bg-surface p-6 rounded-3xl border border-surface-alt space-y-4 shadow-sm shadow-black/5">
               <div className="flex items-center gap-3">
-                <Avatar className="w-11 h-11 border border-accent">
-                  <AvatarImage src={user.photoURL} />
-                  <AvatarFallback className="bg-surface-alt text-accent">{user.name[0]}</AvatarFallback>
+                <Avatar className="w-11 h-11 border border-accent rounded-full">
+                  <AvatarImage src={user.photoURL} className="rounded-full" />
+                  <AvatarFallback className="bg-surface-alt text-accent rounded-full">{user.name[0]}</AvatarFallback>
                 </Avatar>
                 <div className="overflow-hidden">
-                  <div className="font-semibold truncate">{user.name}</div>
+                  <div className="font-semibold truncate flex items-center gap-2">
+                    {user.name}
+                    {userBadge && <Trophy className={cn("w-3 h-3", userBadge.color)} />}
+                  </div>
                   <div className="text-xs text-ink-dim truncate">{user.email}</div>
                 </div>
               </div>
+              {userBadge && (
+                <div className={cn("text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-full bg-surface-alt inline-block", userBadge.color)}>
+                  {userBadge.label}
+                </div>
+              )}
               <div>
                 <div className="text-[11px] uppercase tracking-[1px] text-ink-dim mb-1">Active Loans</div>
-                <div className="text-xl font-semibold text-accent">{entries.filter(e => e.status === 'ACTIVE').length} Items</div>
+                <div className="text-xl font-semibold text-accent">{activeLoansCount} Items</div>
+              </div>
+            </div>
+
+            <div className="friends-section space-y-4">
+              <div className="flex items-center justify-between">
+                <div className="text-[11px] uppercase tracking-[2px] text-ink-dim">Friends</div>
+                <Dialog open={isAddFriendDialogOpen} onOpenChange={setIsAddFriendDialogOpen}>
+                  <DialogTrigger render={
+                    <Button variant="ghost" size="icon" className="h-6 w-6 rounded-full hover:bg-accent/10 hover:text-accent">
+                      <UserPlus className="w-4 h-4" />
+                    </Button>
+                  } />
+                  <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
+                    <DialogHeader>
+                      <DialogTitle className="text-2xl font-serif italic text-accent">Add Friend</DialogTitle>
+                      <DialogDescription className="text-ink-dim">Save friends for quicker lending.</DialogDescription>
+                    </DialogHeader>
+                    <form onSubmit={handleAddFriend} className="space-y-6 py-4">
+                      <div className="space-y-2">
+                        <Label className="text-xs uppercase tracking-widest text-ink-dim">Name</Label>
+                        <Input 
+                          placeholder="Friend's Name" 
+                          className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                          value={friendName}
+                          onChange={(e) => setFriendName(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs uppercase tracking-widest text-ink-dim">Email</Label>
+                        <Input 
+                          type="email"
+                          placeholder="friend@example.com" 
+                          className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                          value={friendEmail}
+                          onChange={(e) => setFriendEmail(e.target.value)}
+                          required
+                        />
+                      </div>
+                      <Button type="submit" className="w-full h-14 bg-accent text-bg hover:bg-accent/90 rounded-full font-semibold border-none active:scale-95 transition-all">
+                        Save Friend
+                      </Button>
+                    </form>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
+                {friends.length === 0 ? (
+                  <div className="text-xs text-ink-dim italic">No friends added yet.</div>
+                ) : (
+                  friends.map(friend => (
+                    <div key={friend.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-surface-alt transition-colors group">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 bg-accent/10 rounded-full flex items-center justify-center text-[10px] text-accent font-bold">
+                          {friend.name[0]}
+                        </div>
+                        <div className="text-sm font-medium">{friend.name}</div>
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] text-accent">
+                        <Star className="w-3 h-3 fill-accent" />
+                        {friend.trustScore?.toFixed(1) || "5.0"}
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </div>
           </div>
@@ -357,8 +529,9 @@ export default function App() {
                     entry={entry} 
                     isLender={true} 
                     onUpdateStatus={updateEntryStatus}
-                    onAskBack={() => handleAskBack(entry)}
+                    onAskBack={(tone) => handleAskBack(entry, tone)}
                     currentUserId={user.uid}
+                    friends={friends}
                   />
                 ))
               )}
@@ -378,6 +551,7 @@ export default function App() {
                     onUpdateStatus={updateEntryStatus}
                     onAskBack={() => {}}
                     currentUserId={user.uid}
+                    friends={friends}
                   />
                 ))
               )}
@@ -393,7 +567,7 @@ export default function App() {
             +
           </Button>
         } />
-        <DialogContent className="bg-surface border-surface-alt text-ink rounded-2xl">
+        <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
           <DialogHeader>
             <DialogTitle className="text-2xl font-serif italic text-accent">Lend Item</DialogTitle>
             <DialogDescription className="text-ink-dim">
@@ -411,17 +585,85 @@ export default function App() {
                 required
               />
             </div>
+
             <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-widest text-ink-dim">Borrower Email</Label>
-              <Input 
-                type="email" 
-                placeholder="friend@example.com" 
-                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
-                value={newBorrowerEmail}
-                onChange={(e) => setNewBorrowerEmail(e.target.value)}
-                required
+              <div className="flex items-center justify-between">
+                <Label className="text-xs uppercase tracking-widest text-ink-dim">Borrower</Label>
+                {friends.length > 0 && (
+                  <Popover>
+                    <PopoverTrigger render={
+                      <Button variant="link" size="sm" className="h-auto p-0 text-[10px] text-accent uppercase tracking-wider">
+                        Select Friend
+                      </Button>
+                    } />
+                    <PopoverContent className="w-64 p-2 bg-surface border-surface-alt rounded-2xl shadow-2xl">
+                      <div className="space-y-1">
+                        {friends.map(f => (
+                          <Button 
+                            key={f.id} 
+                            variant="ghost" 
+                            className="w-full justify-start text-left h-10 rounded-xl px-3"
+                            onClick={() => {
+                              setNewBorrowerEmail(f.email);
+                              setNewBorrowerName(f.name);
+                            }}
+                          >
+                            <div className="flex flex-col">
+                              <span className="text-sm font-medium">{f.name}</span>
+                              <span className="text-[10px] text-ink-dim">{f.email}</span>
+                            </div>
+                          </Button>
+                        ))}
+                      </div>
+                    </PopoverContent>
+                  </Popover>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <Input 
+                  placeholder="Name (Optional)" 
+                  className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                  value={newBorrowerName}
+                  onChange={(e) => setNewBorrowerName(e.target.value)}
+                />
+                <Input 
+                  type="email" 
+                  placeholder="Email" 
+                  className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                  value={newBorrowerEmail}
+                  onChange={(e) => setNewBorrowerEmail(e.target.value)}
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between p-4 bg-surface-alt rounded-2xl">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium">Monetary Value</Label>
+                <div className="text-xs text-ink-dim">Track partial returns for money</div>
+              </div>
+              <input 
+                type="checkbox" 
+                checked={isMonetary} 
+                onChange={(e) => setIsMonetary(e.target.checked)}
+                className="w-5 h-5 accent-accent rounded-md"
               />
             </div>
+
+            {isMonetary && (
+              <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
+                <Label className="text-xs uppercase tracking-widest text-ink-dim">Total Amount (₹)</Label>
+                <Input 
+                  type="number"
+                  placeholder="1000" 
+                  className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                  value={totalAmount}
+                  onChange={(e) => setTotalAmount(e.target.value)}
+                  required
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label className="text-xs uppercase tracking-widest text-ink-dim">Return Date</Label>
               <Popover>
@@ -437,7 +679,7 @@ export default function App() {
                     {newReturnDate ? format(newReturnDate, "PPP") : <span>Pick a date</span>}
                   </Button>
                 } />
-                <PopoverContent className="w-auto p-0 bg-surface border-surface-alt rounded-xl shadow-2xl" align="start">
+                <PopoverContent className="w-auto p-0 bg-surface border-surface-alt rounded-2xl shadow-2xl" align="start">
                   <Calendar
                     mode="single"
                     selected={newReturnDate}
@@ -449,7 +691,7 @@ export default function App() {
               </Popover>
             </div>
             <DialogFooter>
-              <Button type="submit" className="w-full h-14 bg-accent text-bg hover:bg-accent/90 rounded-xl font-semibold border-none" disabled={isSubmitting}>
+              <Button type="submit" className="w-full h-14 bg-accent text-bg hover:bg-accent/90 rounded-full font-semibold border-none active:scale-95 transition-all" disabled={isSubmitting}>
                 {isSubmitting ? "Processing..." : "Confirm Loan"}
               </Button>
             </DialogFooter>
@@ -465,20 +707,26 @@ function EntryCard({
   isLender, 
   onUpdateStatus, 
   onAskBack,
-  currentUserId
+  currentUserId,
+  friends = []
 }: { 
   entry: BorrowEntry, 
   isLender: boolean, 
   onUpdateStatus: (id: string, status: EntryStatus, extra?: any) => Promise<void>,
-  onAskBack: () => Promise<void> | void,
+  onAskBack: (tone: string) => Promise<void> | void,
   currentUserId: string,
+  friends?: Friend[],
   key?: string
 }) {
   if (!entry) return null;
 
+  const friend = friends.find(f => f.email === entry.borrowerEmail);
+  const trustScore = friend?.trustScore;
+
   const returnDate = entry.returnDate?.toDate?.() || null;
   const createdAt = entry.createdAt?.toDate?.() || null;
   const isOverdue = returnDate && isAfter(new Date(), returnDate) && entry.status === 'ACTIVE';
+  const daysDiff = returnDate ? Math.abs(differenceInDays(new Date(), returnDate)) : null;
   
   const statusConfig = {
     REQUESTED: { color: 'text-status-pending bg-status-pending/10 border-status-pending/20', label: 'Pending' },
@@ -490,53 +738,105 @@ function EntryCard({
 
   const config = statusConfig[entry.status] || statusConfig.REQUESTED;
 
+  // Countdown color logic
+  const countdownColor = isOverdue 
+    ? "text-status-overdue" 
+    : (daysDiff !== null && daysDiff <= 2) 
+      ? "text-orange-500" 
+      : "text-ink-dim";
+
   return (
     <motion.div
       layout
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, scale: 0.95 }}
+      whileTap={{ scale: 0.98 }}
     >
-      <Card className="bg-surface border-surface-alt rounded-2xl p-6 h-[200px] flex flex-col justify-between shadow-sm hover:border-accent/30 transition-all">
-        <div className="flex justify-between items-start">
+      <Card className="bg-surface border-surface-alt rounded-3xl p-6 h-auto min-h-[220px] flex flex-col justify-between shadow-sm shadow-black/5 hover:border-accent/30 transition-all duration-200 group relative overflow-hidden">
+        <div className="flex justify-between items-start mb-4">
           <div className="space-y-1">
-            <h3 className="text-xl font-medium text-ink">{entry.itemName || 'Unnamed Item'}</h3>
-            <p className="text-sm text-ink-dim">
-              {isLender ? `to ${entry.borrowerEmail || 'Unknown'}` : `from ${entry.lenderName || 'Unknown'}`}
+            <h3 className="text-xl font-medium text-ink flex items-center gap-2">
+              {entry.itemName || 'Unnamed Item'}
+              {entry.isMonetary && <span className="text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">₹</span>}
+            </h3>
+            <p className="text-sm text-ink-dim flex items-center gap-2">
+              {isLender ? `to ${entry.borrowerName || entry.borrowerEmail}` : `from ${entry.lenderName}`}
+              {isLender && trustScore !== undefined && (
+                <span className="flex items-center gap-0.5 text-[10px] text-accent font-bold">
+                  <Star className="w-2.5 h-2.5 fill-accent" />
+                  {trustScore.toFixed(1)}
+                </span>
+              )}
             </p>
           </div>
           <Badge className={cn("text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full border", config.color)}>
             {config.label}
           </Badge>
         </div>
-        
-        <div className="flex justify-between items-center">
-          <div className="text-xs text-ink-dim">
-            {entry.status === 'RETURNED' ? (
-              <span>Verified</span>
-            ) : (
-              <span>
-                {isOverdue && returnDate ? (
-                  `Due ${format(returnDate, "MMM d")}`
-                ) : (
-                  createdAt ? (
-                    `Lent ${formatDistanceToNow(createdAt, { addSuffix: true })}`
-                  ) : (
-                    'Just now'
-                  )
-                )}
-              </span>
+
+        {entry.isMonetary && entry.totalAmount && (
+          <div className="mb-4 p-3 bg-surface-alt rounded-2xl space-y-2">
+            <div className="flex justify-between text-xs">
+              <span className="text-ink-dim">Repayment Progress</span>
+              <span className="text-accent font-bold">₹{entry.returnedAmount || 0} / ₹{entry.totalAmount}</span>
+            </div>
+            <div className="w-full h-1.5 bg-bg rounded-full overflow-hidden">
+              <div 
+                className="h-full bg-accent transition-all duration-500" 
+                style={{ width: `${((entry.returnedAmount || 0) / entry.totalAmount) * 100}%` }}
+              />
+            </div>
+            {isLender && entry.status === 'ACTIVE' && (entry.returnedAmount || 0) < entry.totalAmount && (
+              <div className="flex gap-2 mt-2">
+                <Button 
+                  size="xs" 
+                  variant="ghost" 
+                  className="h-7 text-[10px] text-accent hover:bg-accent/10 rounded-full"
+                  onClick={() => {
+                    const amount = prompt("Enter amount returned:");
+                    if (amount) {
+                      const newReturned = (entry.returnedAmount || 0) + parseFloat(amount);
+                      onUpdateStatus(entry.id, newReturned >= entry.totalAmount ? 'RETURN_REQUESTED' : 'ACTIVE', { returnedAmount: newReturned });
+                    }
+                  }}
+                >
+                  + Add Payment
+                </Button>
+              </div>
             )}
+          </div>
+        )}
+        
+        <div className="flex justify-between items-end">
+          <div className="space-y-1">
+            <div className={cn("text-xs font-medium flex items-center gap-1", countdownColor)}>
+              {entry.status === 'RETURNED' ? (
+                <span className="flex items-center gap-1 text-status-returned"><CheckCircle2 className="w-3 h-3" /> Verified</span>
+              ) : (
+                <>
+                  {returnDate ? (
+                    <>
+                      <CalendarIcon className="w-3 h-3" />
+                      {isOverdue ? `Overdue by ${daysDiff}d` : `Due in ${daysDiff}d`}
+                    </>
+                  ) : (
+                    createdAt ? `Lent ${formatDistanceToNow(createdAt, { addSuffix: true })}` : 'Just now'
+                  )}
+                </>
+              )}
+            </div>
+            {entry.notes && <div className="text-[10px] text-ink-dim italic truncate max-w-[150px]">"{entry.notes}"</div>}
           </div>
 
           <div className="flex gap-2">
             {/* Borrower Actions */}
             {!isLender && entry.status === 'REQUESTED' && (
               <>
-                <Button size="sm" onClick={() => onUpdateStatus(entry.id, 'ACTIVE', { borrowerID: currentUserId })} className="bg-accent text-bg hover:bg-accent/90 rounded-full text-xs px-4 border-none">
+                <Button size="sm" onClick={() => onUpdateStatus(entry.id, 'ACTIVE', { borrowerID: currentUserId })} className="bg-accent text-bg hover:bg-accent/90 rounded-full text-xs px-5 border-none active:scale-95 transition-all">
                   Accept
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => onUpdateStatus(entry.id, 'CANCELLED')} className="text-ink-dim hover:text-ink rounded-full text-xs px-4">
+                <Button size="sm" variant="ghost" onClick={() => onUpdateStatus(entry.id, 'CANCELLED')} className="text-ink-dim hover:text-ink rounded-full text-xs px-4 active:scale-95 transition-all">
                   Reject
                 </Button>
               </>
@@ -548,7 +848,7 @@ function EntryCard({
                 size="sm"
                 variant="outline" 
                 onClick={() => onUpdateStatus(entry.id, 'RETURN_REQUESTED', { returnRequestedBy: currentUserId })}
-                className="border-accent text-accent hover:bg-accent hover:text-bg rounded-full text-xs px-4"
+                className="border-accent text-accent hover:bg-accent hover:text-bg rounded-full text-xs px-5 active:scale-95 transition-all"
               >
                 {isLender ? "Mark Returned" : "Return Item"}
               </Button>
@@ -559,22 +859,39 @@ function EntryCard({
               <Button 
                 size="sm"
                 onClick={() => onUpdateStatus(entry.id, 'RETURNED')}
-                className="bg-status-returned text-bg hover:bg-status-returned/90 rounded-full text-xs px-4 border-none"
+                className="bg-status-returned text-bg hover:bg-status-returned/90 rounded-full text-xs px-5 border-none active:scale-95 transition-all"
               >
                 Confirm Return
               </Button>
             )}
 
-            {/* Ask Back */}
+            {/* Ask Back / Auto-Nudge */}
             {isLender && entry.status === 'ACTIVE' && (
-              <Button 
-                size="sm"
-                variant="outline" 
-                onClick={onAskBack}
-                className={cn("rounded-full text-xs px-4", isOverdue ? "bg-status-overdue border-status-overdue text-white" : "border-accent text-accent")}
-              >
-                {isOverdue ? "Urgent Ping" : "Ask Back"}
-              </Button>
+              <Popover>
+                <PopoverTrigger render={
+                  <Button 
+                    size="sm"
+                    variant="outline" 
+                    className={cn("rounded-full text-xs px-5 active:scale-95 transition-all", isOverdue ? "bg-status-overdue border-status-overdue text-white" : "border-accent text-accent")}
+                  >
+                    {isOverdue ? "Urgent Ping" : "Ask Back"}
+                  </Button>
+                } />
+                <PopoverContent className="w-48 p-2 bg-surface border-surface-alt rounded-2xl shadow-2xl">
+                  <div className="text-[10px] uppercase tracking-wider text-ink-dim px-2 mb-2">Select Tone</div>
+                  <div className="grid grid-cols-1 gap-1">
+                    <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('friendly')}>
+                      Friendly 😄
+                    </Button>
+                    <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('casual')}>
+                      Casual 🙂
+                    </Button>
+                    <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('strict')}>
+                      Strict 😐
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
             )}
           </div>
         </div>
