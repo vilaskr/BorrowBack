@@ -6,7 +6,7 @@ export const CustomCursor = () => {
   const [isVisible, setIsVisible] = useState(false);
   const [isTouchDevice, setIsTouchDevice] = useState(false);
 
-  const springConfig = { damping: 25, stiffness: 400, mass: 0.2 };
+  const springConfig = { damping: 20, stiffness: 800, mass: 0.1 };
   const cursorX = useSpring(-100, springConfig);
   const cursorY = useSpring(-100, springConfig);
 
@@ -69,11 +69,11 @@ export const CustomCursor = () => {
         opacity: isVisible ? 1 : 0,
       }}
       animate={{
-        scale: isHovering ? 2.5 : 1,
-        boxShadow: isHovering ? "0 0 10px 2px rgba(255, 255, 255, 0.3)" : "0 0 0px 0px rgba(255, 255, 255, 0)",
+        scale: isHovering ? 0.6 : 1,
+        boxShadow: isHovering ? "0 0 8px 1px rgba(255, 255, 255, 0.4)" : "0 0 0px 0px rgba(255, 255, 255, 0)",
       }}
       transition={{
-        scale: { type: "spring", stiffness: 300, damping: 20 },
+        scale: { type: "spring", stiffness: 400, damping: 25 },
         boxShadow: { duration: 0.2 }
       }}
     />

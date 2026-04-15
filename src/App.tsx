@@ -56,7 +56,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
-import { CustomCursor } from '../src/components/CustomCursor';
+import { CustomCursor } from '@/components/CustomCursor';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -359,15 +359,33 @@ export default function App() {
         status: 'ACCEPTED'
       });
 
-      // Create a reciprocal friend entry for the current user
-      const reciprocalFriend: Omit<Friend, 'id'> = {
-        name: requesterName || requesterEmail || 'Friend',
-        email: requesterEmail || 'unknown@example.com', // Fallback to pass validation if still missing
-        addedBy: user.uid,
-        trustScore: 5.0,
-        status: 'ACCEPTED'
-      };
-      await addDoc(collection(db, 'friends'), reciprocalFriend);
+      const finalRequesterEmail = requesterEmail || 'unknown@example.com';
+
+      // Check if a reciprocal entry already exists
+      const q = query(
+        collection(db, 'friends'),
+        where('addedBy', '==', user.uid),
+        where('email', '==', finalRequesterEmail)
+      );
+      const snapshot = await getDocs(q);
+
+      if (!snapshot.empty) {
+        // Update existing entry to ACCEPTED
+        const existingDoc = snapshot.docs[0];
+        await updateDoc(doc(db, 'friends', existingDoc.id), {
+          status: 'ACCEPTED'
+        });
+      } else {
+        // Create a reciprocal friend entry for the current user
+        const reciprocalFriend: Omit<Friend, 'id'> = {
+          name: requesterName || finalRequesterEmail || 'Friend',
+          email: finalRequesterEmail,
+          addedBy: user.uid,
+          trustScore: 5.0,
+          status: 'ACCEPTED'
+        };
+        await addDoc(collection(db, 'friends'), reciprocalFriend);
+      }
       
       toast.success('Friend request accepted!');
     } catch (error) {
@@ -391,6 +409,15 @@ export default function App() {
     if (!user || !newItemName || !newBorrowerEmail) return;
 
     setIsSubmitting(true);
+    if (isMonetary) {
+      const parsedAmount = parseFloat(totalAmount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        toast.error('Please enter a valid total amount');
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     try {
       const newEntry: any = {
         itemName: newItemName,
@@ -407,7 +434,7 @@ export default function App() {
       };
 
       if (isMonetary) {
-        newEntry.totalAmount = parseFloat(totalAmount) || 0;
+        newEntry.totalAmount = parseFloat(totalAmount);
         newEntry.returnedAmount = 0;
       }
 
