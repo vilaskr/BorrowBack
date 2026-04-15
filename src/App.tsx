@@ -153,6 +153,7 @@ export default function App() {
   const [isMonetary, setIsMonetary] = useState(false);
   const [totalAmount, setTotalAmount] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
 
   // Form state for new friend
   const [friendName, setFriendName] = useState('');
@@ -175,6 +176,7 @@ export default function App() {
         setUser(null);
       }
       setLoading(false);
+      setIsLoggingIn(false);
     });
 
     return () => unsubscribe();
@@ -264,12 +266,15 @@ export default function App() {
   }, [entries, user]);
 
   const handleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
     try {
       // Use signInWithPopup as primary method
       await signInWithPopup(auth, googleProvider);
       toast.success('Logged in successfully');
     } catch (error: any) {
       console.error('Login error:', error);
+      setIsLoggingIn(false);
       
       // If popup is blocked or closed, provide helpful feedback
       if (error.code === 'auth/popup-closed-by-user') {
@@ -697,9 +702,21 @@ export default function App() {
           </div>
           <Button 
             onClick={handleLogin}
-            className="w-full h-14 text-lg font-semibold rounded-2xl bg-accent text-bg hover:bg-accent/90 shadow-lg hover:shadow-xl transition-all border-none"
+            disabled={isLoggingIn}
+            className="w-full h-14 text-lg font-semibold rounded-2xl bg-accent text-bg hover:bg-accent/90 shadow-lg hover:shadow-xl transition-all border-none relative overflow-hidden"
           >
-            Sign in with Google
+            {isLoggingIn ? (
+              <motion.div 
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                className="w-6 h-6 border-2 border-bg border-t-transparent rounded-full mx-auto"
+              />
+            ) : (
+              <div className="flex items-center justify-center gap-3">
+                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5" />
+                Sign in with Google
+              </div>
+            )}
           </Button>
           <p className="text-xs text-ink-dim uppercase tracking-widest font-medium">
             Secure • Real-time • Elegant
@@ -753,10 +770,10 @@ export default function App() {
         </div>
 
         <Tabs defaultValue="given" className="w-full">
-          <TabsList className="inline-flex h-12 items-center justify-center rounded-2xl bg-surface-alt p-1 text-ink-dim w-full sm:w-auto mb-10 shadow-inner">
+          <TabsList className="inline-flex h-14 items-center justify-center rounded-full bg-surface-alt p-1.5 text-ink-dim w-full sm:w-auto mb-10 shadow-inner border border-surface-alt/40">
             <TabsTrigger 
               value="given" 
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-xl px-8 py-2 text-sm font-medium transition-all data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-md data-[state=active]:text-accent"
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-full px-10 py-3 text-sm font-bold transition-all data-[state=active]:bg-bg data-[state=active]:text-accent data-[state=active]:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.12)] active:scale-95"
             >
               Given (Lent)
               {givenEntries.filter(e => e.status === 'RETURN_REQUESTED' && e.returnRequestedBy !== user.uid).length > 0 && (
@@ -765,7 +782,7 @@ export default function App() {
             </TabsTrigger>
             <TabsTrigger 
               value="taken" 
-              className="inline-flex items-center justify-center whitespace-nowrap rounded-xl px-8 py-2 text-sm font-medium transition-all data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-md data-[state=active]:text-accent"
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-full px-10 py-3 text-sm font-bold transition-all data-[state=active]:bg-bg data-[state=active]:text-accent data-[state=active]:shadow-[0_4px_12px_-4px_rgba(0,0,0,0.12)] active:scale-95"
             >
               Taken (Borrowed)
               {takenEntries.filter(e => e.status === 'REQUESTED').length > 0 && (
