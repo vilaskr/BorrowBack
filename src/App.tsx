@@ -15,6 +15,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocs,
   query,
   where,
   onSnapshot,
@@ -240,6 +241,38 @@ export default function App() {
         status: newStatus,
         ...extraData
       });
+
+      // If status is RETURNED, update trust score for the borrower
+      if (newStatus === 'RETURNED') {
+        const entrySnap = await getDoc(doc(db, 'borrowEntries', entryId));
+        if (entrySnap.exists()) {
+          const entryData = entrySnap.data() as BorrowEntry;
+          const friendsRef = collection(db, 'friends');
+          const q = query(friendsRef, 
+            where('addedBy', '==', entryData.lenderID), 
+            where('email', '==', entryData.borrowerEmail)
+          );
+          const friendSnap = await getDocs(q);
+          
+          if (!friendSnap.empty) {
+            const friendDoc = friendSnap.docs[0];
+            const currentScore = friendDoc.data().trustScore || 5.0;
+            
+            let penalty = 0;
+            if (entryData.returnDate) {
+              const dueDate = entryData.returnDate.toDate();
+              if (isAfter(new Date(), dueDate)) {
+                const daysLate = differenceInDays(new Date(), dueDate);
+                penalty = Math.min(daysLate * 0.1, 2.0);
+              }
+            }
+            
+            const newScore = Math.max(0, Math.min(5, currentScore + (penalty > 0 ? -penalty : 0.2)));
+            await updateDoc(friendDoc.ref, { trustScore: newScore });
+          }
+        }
+      }
+
       toast.success(`Status updated to ${newStatus.toLowerCase().replace('_', ' ')}`);
     } catch (error) {
       console.error('Update error:', error);
@@ -721,6 +754,9 @@ function EntryCard({
   friends?: Friend[],
   key?: string
 }) {
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [partialAmount, setPartialAmount] = useState('');
+
   if (!entry) return null;
 
   const friend = friends.find(f => f.email === entry.borrowerEmail);
@@ -741,165 +777,237 @@ function EntryCard({
 
   const config = statusConfig[entry.status] || statusConfig.REQUESTED;
 
-  // Countdown color logic
   const countdownColor = isOverdue 
     ? "text-status-overdue" 
     : (daysDiff !== null && daysDiff <= 2) 
       ? "text-orange-500" 
       : "text-ink-dim";
 
+  const handleAddPartial = async () => {
+    const amount = parseFloat(partialAmount);
+    if (isNaN(amount) || amount <= 0) return;
+    
+    const newReturned = (entry.returnedAmount || 0) + amount;
+    await onUpdateStatus(entry.id, newReturned >= (entry.totalAmount || 0) ? 'RETURN_REQUESTED' : 'ACTIVE', { returnedAmount: newReturned });
+    setPartialAmount('');
+  };
+
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.95 }}
-      whileTap={{ scale: 0.98 }}
-    >
-      <Card className="bg-surface border-surface-alt rounded-3xl p-6 h-auto min-h-[220px] flex flex-col justify-between shadow-sm shadow-black/5 hover:border-accent/30 transition-all duration-200 group relative overflow-hidden">
-        <div className="flex justify-between items-start mb-4">
-          <div className="space-y-1">
-            <h3 className="text-xl font-medium text-ink flex items-center gap-2">
-              {entry.itemName || 'Unnamed Item'}
-              {entry.isMonetary && <span className="text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">₹</span>}
-            </h3>
-            <p className="text-sm text-ink-dim flex items-center gap-2">
-              {isLender ? `to ${entry.borrowerName || entry.borrowerEmail}` : `from ${entry.lenderName}`}
-              {isLender && trustScore !== undefined && (
-                <span className="flex items-center gap-0.5 text-[10px] text-accent font-bold">
-                  <Star className="w-2.5 h-2.5 fill-accent" />
-                  {trustScore.toFixed(1)}
-                </span>
-              )}
-            </p>
+    <>
+      <motion.div
+        layout
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        whileTap={{ scale: 0.98 }}
+        onClick={() => setIsDetailOpen(true)}
+        className="cursor-pointer"
+      >
+        <Card className="bg-surface border-surface-alt rounded-3xl p-6 h-auto min-h-[220px] flex flex-col justify-between shadow-sm shadow-black/5 hover:border-accent/30 transition-all duration-200 group relative overflow-hidden">
+          <div className="flex justify-between items-start mb-4">
+            <div className="space-y-1">
+              <h3 className="text-xl font-medium text-ink flex items-center gap-2">
+                {entry.itemName || 'Unnamed Item'}
+                {entry.isMonetary && <span className="text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">₹</span>}
+              </h3>
+              <p className="text-sm text-ink-dim flex items-center gap-2">
+                {isLender ? `to ${entry.borrowerName || entry.borrowerEmail}` : `from ${entry.lenderName}`}
+                {isLender && trustScore !== undefined && (
+                  <span className="flex items-center gap-0.5 text-[10px] text-accent font-bold">
+                    <Star className="w-2.5 h-2.5 fill-accent" />
+                    {trustScore.toFixed(1)}
+                  </span>
+                )}
+              </p>
+            </div>
+            <Badge className={cn("text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full border", config.color)}>
+              {config.label}
+            </Badge>
           </div>
-          <Badge className={cn("text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full border", config.color)}>
-            {config.label}
-          </Badge>
-        </div>
 
-        {entry.isMonetary && entry.totalAmount && (
-          <div className="mb-4 p-3 bg-surface-alt rounded-2xl space-y-2">
-            <div className="flex justify-between text-xs">
-              <span className="text-ink-dim">Repayment Progress</span>
-              <span className="text-accent font-bold">₹{entry.returnedAmount || 0} / ₹{entry.totalAmount}</span>
-            </div>
-            <div className="w-full h-1.5 bg-bg rounded-full overflow-hidden">
-              <div 
-                className="h-full bg-accent transition-all duration-500" 
-                style={{ width: `${((entry.returnedAmount || 0) / entry.totalAmount) * 100}%` }}
-              />
-            </div>
-            {isLender && entry.status === 'ACTIVE' && (entry.returnedAmount || 0) < entry.totalAmount && (
-              <div className="flex gap-2 mt-2">
-                <Button 
-                  size="xs" 
-                  variant="ghost" 
-                  className="h-7 text-[10px] text-accent hover:bg-accent/10 rounded-full"
-                  onClick={() => {
-                    const amount = prompt("Enter amount returned:");
-                    if (amount) {
-                      const newReturned = (entry.returnedAmount || 0) + parseFloat(amount);
-                      onUpdateStatus(entry.id, newReturned >= entry.totalAmount ? 'RETURN_REQUESTED' : 'ACTIVE', { returnedAmount: newReturned });
-                    }
-                  }}
-                >
-                  + Add Payment
-                </Button>
+          {entry.isMonetary && entry.totalAmount && (
+            <div className="mb-4 p-3 bg-surface-alt rounded-2xl space-y-2">
+              <div className="flex justify-between text-xs">
+                <span className="text-ink-dim">Repayment Progress</span>
+                <span className="text-accent font-bold">₹{entry.returnedAmount || 0} / ₹{entry.totalAmount}</span>
               </div>
-            )}
-          </div>
-        )}
-        
-        <div className="flex justify-between items-end">
-          <div className="space-y-1">
-            <div className={cn("text-xs font-medium flex items-center gap-1", countdownColor)}>
-              {entry.status === 'RETURNED' ? (
-                <span className="flex items-center gap-1 text-status-returned"><CheckCircle2 className="w-3 h-3" /> Verified</span>
-              ) : (
-                <>
-                  {returnDate ? (
-                    <>
-                      <CalendarIcon className="w-3 h-3" />
-                      {isOverdue ? `Overdue by ${daysDiff}d` : `Due in ${daysDiff}d`}
-                    </>
-                  ) : (
-                    createdAt ? `Lent ${formatDistanceToNow(createdAt, { addSuffix: true })}` : 'Just now'
-                  )}
-                </>
+              <div className="w-full h-1.5 bg-bg rounded-full overflow-hidden">
+                <div 
+                  className="h-full bg-accent transition-all duration-500" 
+                  style={{ width: `${((entry.returnedAmount || 0) / entry.totalAmount) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+          
+          <div className="flex justify-between items-end">
+            <div className="space-y-1">
+              <div className={cn("text-xs font-medium flex items-center gap-1", countdownColor)}>
+                {entry.status === 'RETURNED' ? (
+                  <span className="flex items-center gap-1 text-status-returned"><CheckCircle2 className="w-3 h-3" /> Verified</span>
+                ) : (
+                  <>
+                    {returnDate ? (
+                      <>
+                        <CalendarIcon className="w-3 h-3" />
+                        {isOverdue ? `Overdue by ${daysDiff}d` : `Due in ${daysDiff}d`}
+                      </>
+                    ) : (
+                      createdAt ? `Lent ${formatDistanceToNow(createdAt, { addSuffix: true })}` : 'Just now'
+                    )}
+                  </>
+                )}
+              </div>
+              {entry.notes && <div className="text-[10px] text-ink-dim italic truncate max-w-[150px]">"{entry.notes}"</div>}
+            </div>
+
+            <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
+              {/* Quick Actions */}
+              {isLender && entry.status === 'ACTIVE' && (
+                <Popover>
+                  <PopoverTrigger render={
+                    <Button 
+                      size="sm"
+                      variant="outline" 
+                      className={cn("rounded-full text-xs px-5 active:scale-95 transition-all", isOverdue ? "bg-status-overdue border-status-overdue text-white" : "border-accent text-accent")}
+                    >
+                      {isOverdue ? "Urgent Ping" : "Ask Back"}
+                    </Button>
+                  } />
+                  <PopoverContent className="w-48 p-2 bg-surface border-surface-alt rounded-2xl shadow-2xl">
+                    <div className="text-[10px] uppercase tracking-wider text-ink-dim px-2 mb-2">Select Tone</div>
+                    <div className="grid grid-cols-1 gap-1">
+                      <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('friendly')}>
+                        Friendly 😄
+                      </Button>
+                      <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('casual')}>
+                        Casual 🙂
+                      </Button>
+                      <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('strict')}>
+                        Strict 😐
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
               )}
             </div>
-            {entry.notes && <div className="text-[10px] text-ink-dim italic truncate max-w-[150px]">"{entry.notes}"</div>}
           </div>
+        </Card>
+      </motion.div>
 
-          <div className="flex gap-2">
-            {/* Borrower Actions */}
-            {!isLender && entry.status === 'REQUESTED' && (
-              <>
-                <Button size="sm" onClick={() => onUpdateStatus(entry.id, 'ACTIVE', { borrowerID: currentUserId })} className="bg-accent text-bg hover:bg-accent/90 rounded-full text-xs px-5 border-none active:scale-95 transition-all">
-                  Accept
-                </Button>
-                <Button size="sm" variant="ghost" onClick={() => onUpdateStatus(entry.id, 'CANCELLED')} className="text-ink-dim hover:text-ink rounded-full text-xs px-4 active:scale-95 transition-all">
-                  Reject
-                </Button>
-              </>
-            )}
+      <Dialog open={isDetailOpen} onOpenChange={setIsDetailOpen}>
+        <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl max-w-md">
+          <DialogHeader>
+            <div className="flex justify-between items-start mb-2">
+              <Badge className={cn("text-[10px] font-bold uppercase tracking-widest px-3 py-1 rounded-full border", config.color)}>
+                {config.label}
+              </Badge>
+              <div className="text-xs text-ink-dim">
+                {createdAt && `Lent ${format(createdAt, "PPP")}`}
+              </div>
+            </div>
+            <DialogTitle className="text-3xl font-serif italic text-accent">{entry.itemName}</DialogTitle>
+            <DialogDescription className="text-ink-dim">
+              {isLender ? `Lent to ${entry.borrowerName || entry.borrowerEmail}` : `Borrowed from ${entry.lenderName}`}
+            </DialogDescription>
+          </DialogHeader>
 
-            {/* Active Actions */}
-            {entry.status === 'ACTIVE' && (
-              <Button 
-                size="sm"
-                variant="outline" 
-                onClick={() => onUpdateStatus(entry.id, 'RETURN_REQUESTED', { returnRequestedBy: currentUserId })}
-                className="border-accent text-accent hover:bg-accent hover:text-bg rounded-full text-xs px-5 active:scale-95 transition-all"
-              >
-                {isLender ? "Mark Returned" : "Return Item"}
-              </Button>
-            )}
+          <div className="space-y-6 py-6">
+            {entry.isMonetary && entry.totalAmount && (
+              <div className="p-5 bg-surface-alt rounded-3xl space-y-4">
+                <div className="flex justify-between items-end">
+                  <div className="space-y-1">
+                    <div className="text-[10px] uppercase tracking-widest text-ink-dim">Repayment Status</div>
+                    <div className="text-2xl font-semibold text-accent">₹{entry.returnedAmount || 0} <span className="text-sm text-ink-dim font-normal">of ₹{entry.totalAmount}</span></div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase tracking-widest text-ink-dim">Remaining</div>
+                    <div className="text-lg font-medium text-ink">₹{(entry.totalAmount || 0) - (entry.returnedAmount || 0)}</div>
+                  </div>
+                </div>
+                <div className="w-full h-2 bg-bg rounded-full overflow-hidden">
+                  <div 
+                    className="h-full bg-accent transition-all duration-500" 
+                    style={{ width: `${((entry.returnedAmount || 0) / entry.totalAmount) * 100}%` }}
+                  />
+                </div>
 
-            {/* Return Confirmation */}
-            {entry.status === 'RETURN_REQUESTED' && entry.returnRequestedBy !== currentUserId && (
-              <Button 
-                size="sm"
-                onClick={() => onUpdateStatus(entry.id, 'RETURNED')}
-                className="bg-status-returned text-bg hover:bg-status-returned/90 rounded-full text-xs px-5 border-none active:scale-95 transition-all"
-              >
-                Confirm Return
-              </Button>
-            )}
-
-            {/* Ask Back / Auto-Nudge */}
-            {isLender && entry.status === 'ACTIVE' && (
-              <Popover>
-                <PopoverTrigger render={
-                  <Button 
-                    size="sm"
-                    variant="outline" 
-                    className={cn("rounded-full text-xs px-5 active:scale-95 transition-all", isOverdue ? "bg-status-overdue border-status-overdue text-white" : "border-accent text-accent")}
-                  >
-                    {isOverdue ? "Urgent Ping" : "Ask Back"}
-                  </Button>
-                } />
-                <PopoverContent className="w-48 p-2 bg-surface border-surface-alt rounded-2xl shadow-2xl">
-                  <div className="text-[10px] uppercase tracking-wider text-ink-dim px-2 mb-2">Select Tone</div>
-                  <div className="grid grid-cols-1 gap-1">
-                    <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('friendly')}>
-                      Friendly 😄
-                    </Button>
-                    <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('casual')}>
-                      Casual 🙂
-                    </Button>
-                    <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('strict')}>
-                      Strict 😐
+                {isLender && entry.status === 'ACTIVE' && (entry.returnedAmount || 0) < entry.totalAmount && (
+                  <div className="flex gap-2 pt-2">
+                    <Input 
+                      type="number" 
+                      placeholder="Amount" 
+                      className="bg-bg border-none h-10 rounded-xl text-sm"
+                      value={partialAmount}
+                      onChange={(e) => setPartialAmount(e.target.value)}
+                    />
+                    <Button size="sm" className="bg-accent text-bg rounded-xl px-4" onClick={handleAddPartial}>
+                      Add Payment
                     </Button>
                   </div>
-                </PopoverContent>
-              </Popover>
+                )}
+              </div>
             )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-4 bg-surface-alt rounded-2xl space-y-1">
+                <div className="text-[10px] uppercase tracking-widest text-ink-dim">Due Date</div>
+                <div className={cn("text-sm font-medium", countdownColor)}>
+                  {returnDate ? format(returnDate, "MMM d, yyyy") : "No due date"}
+                </div>
+              </div>
+              <div className="p-4 bg-surface-alt rounded-2xl space-y-1">
+                <div className="text-[10px] uppercase tracking-widest text-ink-dim">Friend Trust</div>
+                <div className="text-sm font-medium flex items-center gap-1">
+                  <Star className="w-3 h-3 fill-accent text-accent" />
+                  {trustScore?.toFixed(1) || "5.0"}
+                </div>
+              </div>
+            </div>
+
+            {entry.notes && (
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-widest text-ink-dim">Notes</Label>
+                <div className="p-4 bg-surface-alt rounded-2xl text-sm italic text-ink-dim">
+                  "{entry.notes}"
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col gap-3 pt-4">
+              {!isLender && entry.status === 'REQUESTED' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Button onClick={() => onUpdateStatus(entry.id, 'ACTIVE', { borrowerID: currentUserId })} className="bg-accent text-bg rounded-full h-12 font-semibold">
+                    Accept Request
+                  </Button>
+                  <Button variant="ghost" onClick={() => onUpdateStatus(entry.id, 'CANCELLED')} className="text-ink-dim rounded-full h-12">
+                    Reject
+                  </Button>
+                </div>
+              )}
+
+              {entry.status === 'ACTIVE' && (
+                <Button 
+                  onClick={() => onUpdateStatus(entry.id, 'RETURN_REQUESTED', { returnRequestedBy: currentUserId })}
+                  className="bg-accent text-bg rounded-full h-14 font-semibold text-lg"
+                >
+                  {isLender ? "Mark as Returned" : "I've Returned This"}
+                </Button>
+              )}
+
+              {entry.status === 'RETURN_REQUESTED' && entry.returnRequestedBy !== currentUserId && (
+                <Button 
+                  onClick={() => onUpdateStatus(entry.id, 'RETURNED')}
+                  className="bg-status-returned text-bg rounded-full h-14 font-semibold text-lg"
+                >
+                  Confirm Receipt
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
-      </Card>
-    </motion.div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
