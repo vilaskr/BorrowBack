@@ -657,7 +657,7 @@ export default function App() {
       <Toaster position="top-center" theme="dark" />
       
       {/* Sidebar - Desktop */}
-      <aside className="hidden lg:flex w-80 flex-col p-10 border-r border-surface-alt h-screen sticky top-0">
+      <aside className="hidden lg:flex w-80 flex-col p-10 border-r border-surface-alt h-screen sticky top-0 overflow-y-auto custom-scrollbar">
         <SidebarContent 
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
@@ -1074,7 +1074,7 @@ const SidebarContent = ({
   handleLogout
 }: SidebarContentProps) => {
   return (
-    <div className="flex flex-col justify-between h-full">
+    <div className="flex flex-col justify-between min-h-full">
     <div className="space-y-10">
       <div className="logo-section">
         <h1 className="font-serif italic text-3xl text-accent tracking-tighter">BorrowBack</h1>
