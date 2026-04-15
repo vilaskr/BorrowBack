@@ -56,6 +56,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '@/lib/utils';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
+import { CustomCursor } from '../src/components/CustomCursor';
 
 export default function App() {
   const [user, setUser] = useState<UserProfile | null>(null);
@@ -654,6 +655,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg text-ink font-sans flex flex-col lg:flex-row">
+      <CustomCursor />
       <Toaster position="top-center" theme="dark" />
       
       {/* Sidebar - Desktop */}
@@ -1403,25 +1405,48 @@ function EntryCard({
                 <Popover>
                   <PopoverTrigger render={
                     <Button 
-                      size="sm"
-                      variant="outline" 
-                      className={cn("rounded-full text-xs px-5 active:scale-95 transition-all", isOverdue ? "bg-status-overdue border-status-overdue text-white" : "border-accent text-accent")}
-                    >
-                      {isOverdue ? "Urgent Ping" : "Ask Back"}
-                    </Button>
+  size="sm"
+  className={cn(
+    "rounded-full text-xs px-5 py-2 font-medium transition-all duration-300 active:scale-95",
+    
+    isOverdue
+      ? "bg-status-overdue/90 text-white border border-status-overdue shadow-[0_0_12px_rgba(255,80,80,0.6)] hover:shadow-[0_0_18px_rgba(255,80,80,0.9)]"
+      : "bg-white/10 backdrop-blur-md text-white border border-white/20 shadow-[0_0_10px_rgba(255,255,255,0.15)] hover:bg-white/20 hover:shadow-[0_0_16px_rgba(255,255,255,0.35)]"
+  )}
+>
+  {isOverdue ? "Urgent Ping" : "Ask Back"}
+</Button>
                   } />
                   <PopoverContent className="w-48 p-2 bg-surface border-surface-alt rounded-2xl shadow-2xl">
                     <div className="text-[10px] uppercase tracking-wider text-ink-dim px-2 mb-2">Select Tone</div>
                     <div className="grid grid-cols-1 gap-1">
-                      <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('friendly')}>
-                        Friendly 😄
-                      </Button>
-                      <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('casual')}>
-                        Casual 🙂
-                      </Button>
-                      <Button variant="ghost" size="sm" className="justify-start rounded-xl h-9 text-xs" onClick={() => onAskBack('strict')}>
-                        Strict 😐
-                      </Button>
+                      <Button
+  size="sm"
+  className="justify-start rounded-xl h-9 text-xs 
+             bg-gray-800 text-gray-200 
+             hover:bg-gray-700 active:scale-95 transition-all"
+  onClick={() => onAskBack('friendly')}
+>
+  Friendly 😄
+</Button>
+                      <Button
+  size="sm"
+  className="justify-start rounded-xl h-9 text-xs 
+             bg-gray-800 text-gray-200 
+             hover:bg-gray-700 active:scale-95 transition-all"
+  onClick={() => onAskBack('casual')}
+>
+  Casual 🙂
+</Button>
+                      <Button
+  size="sm"
+  className="justify-start rounded-xl h-9 text-xs 
+             bg-gray-800 text-gray-200 
+             hover:bg-gray-700 active:scale-95 transition-all"
+  onClick={() => onAskBack('strict')}
+>
+  Strict 😐
+</Button>
                     </div>
                   </PopoverContent>
                 </Popover>
