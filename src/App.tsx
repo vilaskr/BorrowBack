@@ -70,10 +70,20 @@ export default function App() {
 
   // Track seen reminders to avoid duplicate toasts
   const seenReminders = React.useRef<Set<string>>(new Set());
-  const notificationSound = React.useRef<HTMLAudioElement | null>(null);
+  const notificationSounds = React.useRef<Record<string, HTMLAudioElement>>({});
 
   useEffect(() => {
-    notificationSound.current = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+    const sounds = {
+      friendly: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3',
+      casual: 'https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3',
+      strict: 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3'
+    };
+
+    Object.entries(sounds).forEach(([tone, url]) => {
+      const audio = new Audio(url);
+      audio.load();
+      notificationSounds.current[tone] = audio;
+    });
     
     // Request notification permission
     if (typeof window !== 'undefined' && "Notification" in window && Notification.permission === "default") {
@@ -99,15 +109,12 @@ export default function App() {
 
   const triggerNotification = (title: string, body: string, tone: 'friendly' | 'casual' | 'strict' = 'friendly') => {
     try {
-      // Play sound based on tone
-      const sounds = {
-        friendly: 'https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3', // Soft chime
-        casual: 'https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3', // Pop/Bubble
-        strict: 'https://assets.mixkit.co/active_storage/sfx/951/951-preview.mp3' // Alert/Beep
-      };
-
-      const audio = new Audio(sounds[tone]);
-      audio.play().catch(e => console.warn("Sound play blocked:", e));
+      // Play preloaded sound based on tone
+      const audio = notificationSounds.current[tone];
+      if (audio) {
+        audio.currentTime = 0;
+        audio.play().catch(e => console.warn("Sound play blocked:", e));
+      }
 
       // System notification
       if (typeof window !== 'undefined' && "Notification" in window) {
@@ -991,7 +998,16 @@ function EntryCard({
     if (isNaN(amount) || amount <= 0) return;
     
     const newReturned = (entry.returnedAmount || 0) + amount;
-    await onUpdateStatus(entry.id, newReturned >= (entry.totalAmount || 0) ? 'RETURN_REQUESTED' : 'ACTIVE', { returnedAmount: newReturned });
+    const isFullyReturned = newReturned >= (entry.totalAmount || 0);
+    
+    // If lender is adding payment and it's full, mark as RETURNED
+    // If borrower was adding (not currently possible in UI but for safety), mark as RETURN_REQUESTED
+    const nextStatus = isFullyReturned ? (isLender ? 'RETURNED' : 'RETURN_REQUESTED') : 'ACTIVE';
+    
+    await onUpdateStatus(entry.id, nextStatus, { 
+      returnedAmount: newReturned,
+      ...(isFullyReturned && !isLender ? { returnRequestedBy: currentUserId } : {})
+    });
     setPartialAmount('');
   };
 
@@ -1037,7 +1053,7 @@ function EntryCard({
               <div className="w-full h-1.5 bg-bg rounded-full overflow-hidden">
                 <div 
                   className="h-full bg-accent transition-all duration-500" 
-                  style={{ width: `${((entry.returnedAmount || 0) / entry.totalAmount) * 100}%` }}
+                  style={{ width: `${entry.totalAmount && entry.totalAmount > 0 ? Math.min(100, ((entry.returnedAmount || 0) / entry.totalAmount) * 100) : 0}%` }}
                 />
               </div>
             </div>
@@ -1131,7 +1147,7 @@ function EntryCard({
                 <div className="w-full h-2 bg-bg rounded-full overflow-hidden">
                   <div 
                     className="h-full bg-accent transition-all duration-500" 
-                    style={{ width: `${((entry.returnedAmount || 0) / entry.totalAmount) * 100}%` }}
+                    style={{ width: `${entry.totalAmount && entry.totalAmount > 0 ? Math.min(100, ((entry.returnedAmount || 0) / entry.totalAmount) * 100) : 0}%` }}
                   />
                 </div>
 
