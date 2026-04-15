@@ -20,6 +20,8 @@ export interface BorrowEntry {
   totalAmount?: number; // For partial returns
   returnedAmount?: number; // For partial returns
   isMonetary?: boolean;
+  hiddenByLender?: boolean;
+  hiddenByBorrower?: boolean;
 }
 
 export interface Friend {

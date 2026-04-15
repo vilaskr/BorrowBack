@@ -189,22 +189,26 @@ export default function App() {
     // Listen for entries where user is lender
     const qLender = query(collection(db, 'borrowEntries'), where('lenderID', '==', user.uid));
     const unsubscribeLender = onSnapshot(qLender, (snapshot) => {
-      const lenderEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
+      const lenderEntries = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry))
+        .filter(e => !e.hiddenByLender);
       setEntries(prev => {
         const otherEntries = prev.filter(e => e.lenderID !== user.uid);
         return [...otherEntries, ...lenderEntries];
       });
-    });
+    }, (error) => console.error("Lender listener error:", error));
 
     // Listen for entries where user is borrower (by email)
     const qBorrower = query(collection(db, 'borrowEntries'), where('borrowerEmail', '==', user.email));
     const unsubscribeBorrower = onSnapshot(qBorrower, (snapshot) => {
-      const borrowerEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
+      const borrowerEntries = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry))
+        .filter(e => !e.hiddenByBorrower);
       setEntries(prev => {
         const otherEntries = prev.filter(e => e.borrowerEmail !== user.email);
         return [...otherEntries, ...borrowerEntries];
       });
-    });
+    }, (error) => console.error("Borrower listener error:", error));
 
     // Listen for friends
     const qFriends = query(collection(db, 'friends'), where('addedBy', '==', user.uid));
@@ -421,21 +425,27 @@ export default function App() {
     if (!user) return;
     
     try {
-      const myLent = entries.filter(e => e.lenderID === user.uid);
-      const myBorrowed = entries.filter(e => e.borrowerEmail === user.email);
-      const allToDelete = [...myLent, ...myBorrowed];
+      const myLent = entries.filter(e => e.lenderID === user.uid && !e.hiddenByLender);
+      const myBorrowed = entries.filter(e => e.borrowerEmail === user.email && !e.hiddenByBorrower);
+      const allToHide = [...myLent, ...myBorrowed];
       
-      if (allToDelete.length === 0) {
+      if (allToHide.length === 0) {
         toast.info("Inventory is already empty");
         return;
       }
 
       const batch = writeBatch(db);
-      allToDelete.forEach(entry => {
-        batch.delete(doc(db, 'borrowEntries', entry.id));
+      const uniqueEntries = new Map<string, BorrowEntry>();
+      allToHide.forEach(e => uniqueEntries.set(e.id, e));
+
+      uniqueEntries.forEach((entry, id) => {
+        const updates: any = {};
+        if (entry.lenderID === user.uid) updates.hiddenByLender = true;
+        if (entry.borrowerEmail === user.email) updates.hiddenByBorrower = true;
+        batch.update(doc(db, 'borrowEntries', id), updates);
       });
       await batch.commit();
-      toast.success("Inventory cleared successfully");
+      toast.success("Your inventory has been cleared");
     } catch (error) {
       console.error("Clear inventory error:", error);
       toast.error("Failed to clear inventory");
@@ -1207,14 +1217,14 @@ function EntryCard({
 
               {entry.status === 'ACTIVE' && (
                 <Button 
-                  onClick={() => onUpdateStatus(entry.id, 'RETURN_REQUESTED', { returnRequestedBy: currentUserId })}
+                  onClick={() => onUpdateStatus(entry.id, isLender ? 'RETURNED' : 'RETURN_REQUESTED', { returnRequestedBy: currentUserId })}
                   className="bg-accent text-bg rounded-full h-14 font-semibold text-lg"
                 >
                   {isLender ? "Mark as Returned" : "I've Returned This"}
                 </Button>
               )}
 
-              {entry.status === 'RETURN_REQUESTED' && entry.returnRequestedBy !== currentUserId && (
+              {entry.status === 'RETURN_REQUESTED' && isLender && (
                 <Button 
                   onClick={() => onUpdateStatus(entry.id, 'RETURNED')}
                   className="bg-status-returned text-bg rounded-full h-14 font-semibold text-lg"

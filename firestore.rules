@@ -105,7 +105,7 @@ service cloud.firestore {
                       (isLender(resource.data) || isBorrower(resource.data)) &&
                       isValidBorrowEntry(request.resource.data);
       
-      allow delete: if false; // We don't delete, we cancel or return
+      allow delete: if isAuthenticated() && (isLender(resource.data) || isBorrower(resource.data));
     }
 
     match /friends/{friendId} {
