@@ -110,11 +110,20 @@ export default function App() {
 
   const handleLogin = async () => {
     try {
+      // Use signInWithPopup as primary method
       await signInWithPopup(auth, googleProvider);
       toast.success('Logged in successfully');
-    } catch (error) {
+    } catch (error: any) {
       console.error('Login error:', error);
-      toast.error('Failed to login');
+      
+      // If popup is blocked or closed, provide helpful feedback
+      if (error.code === 'auth/popup-closed-by-user') {
+        toast.error('Login popup was closed. Please try again.');
+      } else if (error.code === 'auth/unauthorized-domain') {
+        toast.error('This domain is not authorized in Firebase Console. Please add your Vercel domain to Authorized Domains.');
+      } else {
+        toast.error('Failed to login. Please check your connection or try again.');
+      }
     }
   };
 
@@ -316,23 +325,23 @@ export default function App() {
         </div>
 
         <Tabs defaultValue="given" className="w-full">
-          <TabsList className="flex gap-8 bg-transparent border-b border-surface-alt rounded-none h-auto p-0 mb-8 w-full justify-start">
+          <TabsList className="inline-flex h-12 items-center justify-center rounded-2xl bg-surface-alt p-1 text-ink-dim w-full sm:w-auto mb-10 shadow-inner">
             <TabsTrigger 
               value="given" 
-              className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-accent px-0 pb-3 text-sm uppercase tracking-[2px] text-ink-dim data-[state=active]:text-ink transition-all"
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-xl px-8 py-2 text-sm font-medium transition-all data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-md data-[state=active]:text-accent"
             >
               Given (Lent)
               {givenEntries.filter(e => e.status === 'RETURN_REQUESTED' && e.returnRequestedBy !== user.uid).length > 0 && (
-                <span className="ml-2 w-2 h-2 bg-accent rounded-full" />
+                <span className="ml-2 w-2 h-2 bg-accent rounded-full animate-pulse" />
               )}
             </TabsTrigger>
             <TabsTrigger 
               value="taken" 
-              className="bg-transparent data-[state=active]:bg-transparent data-[state=active]:shadow-none rounded-none border-b-2 border-transparent data-[state=active]:border-accent px-0 pb-3 text-sm uppercase tracking-[2px] text-ink-dim data-[state=active]:text-ink transition-all"
+              className="inline-flex items-center justify-center whitespace-nowrap rounded-xl px-8 py-2 text-sm font-medium transition-all data-[state=active]:bg-surface data-[state=active]:text-ink data-[state=active]:shadow-md data-[state=active]:text-accent"
             >
               Taken (Borrowed)
               {takenEntries.filter(e => e.status === 'REQUESTED').length > 0 && (
-                <span className="ml-2 w-2 h-2 bg-accent rounded-full" />
+                <span className="ml-2 w-2 h-2 bg-accent rounded-full animate-pulse" />
               )}
             </TabsTrigger>
           </TabsList>
