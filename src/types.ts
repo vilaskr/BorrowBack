@@ -13,6 +13,7 @@ export interface BorrowEntry {
   createdAt: any; // Firestore Timestamp
   returnDate?: any; // Firestore Timestamp
   notes?: string;
+  borrowerReply?: string;
   returnRequestedBy?: string;
   lastReminderSentAt?: any; // Firestore Timestamp
   lastReminderTone?: 'friendly' | 'casual' | 'strict';
@@ -30,6 +31,9 @@ export interface Friend {
   email: string;
   addedBy: string;
   trustScore?: number; // 0-5
+  status?: 'PENDING' | 'ACCEPTED';
+  requesterEmail?: string;
+  requesterName?: string;
 }
 
 export interface UserProfile {

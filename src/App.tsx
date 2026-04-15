@@ -32,7 +32,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Toaster, toast } from 'sonner';
@@ -62,6 +62,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [entries, setEntries] = useState<BorrowEntry[]>([]);
   const [friends, setFriends] = useState<Friend[]>([]);
+  const [friendRequests, setFriendRequests] = useState<Friend[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [friendSearchQuery, setFriendSearchQuery] = useState('');
   const [isLendDialogOpen, setIsLendDialogOpen] = useState(false);
@@ -219,10 +220,18 @@ export default function App() {
       setFriends(friendsList);
     });
 
+    // Listen for friend requests
+    const qRequests = query(collection(db, 'friends'), where('email', '==', user.email), where('status', '==', 'PENDING'));
+    const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
+      const requestsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Friend));
+      setFriendRequests(requestsList);
+    });
+
     return () => {
       unsubscribeLender();
       unsubscribeBorrower();
       unsubscribeFriends();
+      unsubscribeRequests();
     };
   }, [user]);
 
@@ -307,16 +316,54 @@ export default function App() {
         email: friendEmail.toLowerCase().trim(),
         addedBy: user.uid,
         trustScore: 5.0, // Initial trust score
+        status: 'PENDING',
+        requesterEmail: user.email || '',
+        requesterName: user.displayName || 'Someone',
       };
 
       await addDoc(collection(db, 'friends'), newFriend);
-      toast.success('Friend added!');
+      toast.success('Friend request sent!');
       setIsAddFriendDialogOpen(false);
       setFriendName('');
       setFriendEmail('');
     } catch (error) {
       console.error('Add friend error:', error);
-      toast.error('Failed to add friend');
+      toast.error('Failed to send friend request');
+    }
+  };
+
+  const handleAcceptFriendRequest = async (request: Friend) => {
+    if (!user) return;
+    try {
+      // Update the original request to ACCEPTED
+      await updateDoc(doc(db, 'friends', request.id), {
+        status: 'ACCEPTED'
+      });
+
+      // Create a reciprocal friend entry for the current user
+      const reciprocalFriend: Omit<Friend, 'id'> = {
+        name: request.requesterName || request.requesterEmail || 'Friend',
+        email: request.requesterEmail || '',
+        addedBy: user.uid,
+        trustScore: 5.0,
+        status: 'ACCEPTED'
+      };
+      await addDoc(collection(db, 'friends'), reciprocalFriend);
+      
+      toast.success('Friend request accepted!');
+    } catch (error) {
+      console.error('Accept friend error:', error);
+      toast.error('Failed to accept friend request');
+    }
+  };
+
+  const handleRejectFriendRequest = async (requestId: string) => {
+    try {
+      await deleteDoc(doc(db, 'friends', requestId));
+      toast.success('Friend request rejected');
+    } catch (error) {
+      console.error('Reject friend error:', error);
+      toast.error('Failed to reject friend request');
     }
   };
 
@@ -610,6 +657,9 @@ export default function App() {
           setFriendEmail={setFriendEmail}
           handleAddFriend={handleAddFriend}
           friends={friends}
+          friendRequests={friendRequests}
+          handleAcceptFriendRequest={handleAcceptFriendRequest}
+          handleRejectFriendRequest={handleRejectFriendRequest}
           clearInventory={clearInventory}
           handleLogout={handleLogout}
         />
@@ -642,6 +692,9 @@ export default function App() {
                 setFriendEmail={setFriendEmail}
                 handleAddFriend={handleAddFriend}
                 friends={friends}
+                friendRequests={friendRequests}
+                handleAcceptFriendRequest={handleAcceptFriendRequest}
+                handleRejectFriendRequest={handleRejectFriendRequest}
                 clearInventory={clearInventory}
                 handleLogout={handleLogout}
               />
@@ -929,6 +982,9 @@ interface SidebarContentProps {
   setFriendEmail: (val: string) => void;
   handleAddFriend: (e: React.FormEvent) => Promise<void>;
   friends: Friend[];
+  friendRequests: Friend[];
+  handleAcceptFriendRequest: (request: Friend) => Promise<void>;
+  handleRejectFriendRequest: (requestId: string) => Promise<void>;
   clearInventory: () => Promise<void>;
   handleLogout: () => Promise<void>;
 }
@@ -950,6 +1006,9 @@ const SidebarContent = ({
   setFriendEmail,
   handleAddFriend,
   friends,
+  friendRequests,
+  handleAcceptFriendRequest,
+  handleRejectFriendRequest,
   clearInventory,
   handleLogout
 }: SidebarContentProps) => {
@@ -1060,6 +1119,33 @@ const SidebarContent = ({
             </div>
           )}
 
+          {friendRequests.length > 0 && (
+            <div className="space-y-2 mb-4">
+              <div className="text-[11px] uppercase tracking-[2px] text-accent font-semibold">Friend Requests ({friendRequests.length})</div>
+              {friendRequests.map(request => (
+                <div key={request.id} className="flex flex-col gap-2 p-3 bg-accent/5 border border-accent/20 rounded-xl">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 bg-accent/20 rounded-full flex items-center justify-center text-[10px] text-accent font-bold">
+                      {request.requesterName?.[0] || request.requesterEmail?.[0] || '?'}
+                    </div>
+                    <div className="flex flex-col">
+                      <span className="text-sm font-medium">{request.requesterName || 'Someone'}</span>
+                      <span className="text-[10px] text-ink-dim">{request.requesterEmail}</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-2 mt-1">
+                    <Button size="sm" className="h-7 flex-1 bg-accent text-bg rounded-lg text-xs" onClick={() => handleAcceptFriendRequest(request)}>
+                      Accept
+                    </Button>
+                    <Button size="sm" variant="ghost" className="h-7 flex-1 text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-lg text-xs" onClick={() => handleRejectFriendRequest(request.id)}>
+                      Reject
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
             {friends.length === 0 ? (
               <div className="text-xs text-ink-dim italic">No friends added yet.</div>
@@ -1072,7 +1158,14 @@ const SidebarContent = ({
                     <div className="w-7 h-7 bg-accent/10 rounded-full flex items-center justify-center text-[10px] text-accent font-bold">
                       {friend.name[0]}
                     </div>
-                    <div className="text-sm font-medium">{friend.name}</div>
+                    <div className="flex flex-col">
+                      <div className="text-sm font-medium flex items-center gap-2">
+                        {friend.name}
+                        {friend.status === 'PENDING' && (
+                          <span className="text-[8px] bg-accent/10 text-accent px-1.5 py-0.5 rounded-full uppercase tracking-wider">Pending</span>
+                        )}
+                      </div>
+                    </div>
                   </div>
                   <div className="flex items-center gap-1 text-[10px] text-accent">
                     <Star className="w-3 h-3 fill-accent" />
@@ -1101,13 +1194,15 @@ const SidebarContent = ({
               </DialogDescription>
             </DialogHeader>
             <DialogFooter className="flex gap-3 sm:justify-start">
-              <Button variant="ghost" className="rounded-full" onClick={() => {}}>Cancel</Button>
-              <Button 
-                className="bg-status-overdue text-bg hover:bg-status-overdue/90 rounded-full px-8"
-                onClick={clearInventory}
-              >
-                Yes, Clear All
-              </Button>
+              <DialogClose render={<Button variant="ghost" className="rounded-full">Cancel</Button>} />
+              <DialogClose render={
+                <Button 
+                  className="bg-status-overdue text-bg hover:bg-status-overdue/90 rounded-full px-8"
+                  onClick={clearInventory}
+                >
+                  Yes, Clear All
+                </Button>
+              } />
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -1142,6 +1237,7 @@ function EntryCard({
 }: EntryCardProps) {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [partialAmount, setPartialAmount] = useState('');
+  const [replyText, setReplyText] = useState('');
 
   if (!entry) return null;
 
@@ -1185,6 +1281,12 @@ function EntryCard({
       ...(isFullyReturned && !isLender ? { returnRequestedBy: currentUserId } : {})
     });
     setPartialAmount('');
+  };
+
+  const handleReply = async () => {
+    if (!replyText.trim()) return;
+    await onUpdateStatus(entry.id, entry.status, { borrowerReply: replyText.trim() });
+    setReplyText('');
   };
 
   return (
@@ -1367,6 +1469,27 @@ function EntryCard({
                 <div className="p-4 bg-surface-alt rounded-2xl text-sm italic text-ink-dim">
                   "{entry.notes}"
                 </div>
+                
+                {entry.borrowerReply ? (
+                  <div className="mt-2 pl-4 border-l-2 border-accent/30 space-y-1">
+                    <Label className="text-[10px] uppercase tracking-widest text-accent">Reply</Label>
+                    <div className="text-sm text-ink-dim">
+                      "{entry.borrowerReply}"
+                    </div>
+                  </div>
+                ) : !isLender ? (
+                  <div className="mt-2 flex gap-2">
+                    <Input 
+                      placeholder="Reply to note (once only)..." 
+                      className="bg-surface-alt border-none h-10 rounded-xl text-sm"
+                      value={replyText}
+                      onChange={(e) => setReplyText(e.target.value)}
+                    />
+                    <Button size="sm" className="bg-accent text-bg rounded-xl px-4" onClick={handleReply} disabled={!replyText.trim()}>
+                      Reply
+                    </Button>
+                  </div>
+                ) : null}
               </div>
             )}
 
