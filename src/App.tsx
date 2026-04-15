@@ -69,6 +69,9 @@ export default function App() {
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isClearInventoryOpen, setIsClearInventoryOpen] = useState(false);
+  const [dropdownSearchQuery, setDropdownSearchQuery] = useState('');
+  const [isSelectFriendOpen, setIsSelectFriendOpen] = useState(false);
+  const [loadingFriends, setLoadingFriends] = useState(true);
 
   // Track seen reminders to avoid duplicate toasts
   const seenReminders = React.useRef<Set<string>>(new Set());
@@ -219,6 +222,7 @@ export default function App() {
     const unsubscribeFriends = onSnapshot(qFriends, (snapshot) => {
       const friendsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Friend));
       setFriends(friendsList);
+      setLoadingFriends(false);
     });
 
     // Listen for friend requests
@@ -336,6 +340,19 @@ export default function App() {
   const handleAcceptFriendRequest = async (request: Friend) => {
     if (!user) return;
     try {
+      // Fetch requester's user document to ensure we have their email and name
+      let requesterEmail = request.requesterEmail;
+      let requesterName = request.requesterName;
+
+      if (!requesterEmail || !requesterName) {
+        const userDoc = await getDoc(doc(db, 'users', request.addedBy));
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          requesterEmail = requesterEmail || userData.email;
+          requesterName = requesterName || userData.name;
+        }
+      }
+
       // Update the original request to ACCEPTED
       await updateDoc(doc(db, 'friends', request.id), {
         status: 'ACCEPTED'
@@ -343,8 +360,8 @@ export default function App() {
 
       // Create a reciprocal friend entry for the current user
       const reciprocalFriend: Omit<Friend, 'id'> = {
-        name: request.requesterName || request.requesterEmail || 'Friend',
-        email: request.requesterEmail || '',
+        name: requesterName || requesterEmail || 'Friend',
+        email: requesterEmail || 'unknown@example.com', // Fallback to pass validation if still missing
         addedBy: user.uid,
         trustScore: 5.0,
         status: 'ACCEPTED'
@@ -846,31 +863,48 @@ export default function App() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label className="text-xs uppercase tracking-widest text-ink-dim">Borrower</Label>
-                {friends.length > 0 && (
-                  <Popover>
+                {friends.filter(f => f.status === 'ACCEPTED').length > 0 && (
+                  <Popover open={isSelectFriendOpen} onOpenChange={setIsSelectFriendOpen}>
                     <PopoverTrigger render={
                       <Button variant="link" size="sm" className="h-auto p-0 text-[10px] text-accent uppercase tracking-wider">
                         Select Friend
                       </Button>
                     } />
-                    <PopoverContent className="w-64 p-2 bg-surface border-surface-alt rounded-2xl shadow-2xl">
-                      <div className="space-y-1">
-                        {friends.map(f => (
-                          <Button 
-                            key={f.id} 
-                            variant="ghost" 
-                            className="w-full justify-start text-left h-10 rounded-xl px-3"
-                            onClick={() => {
-                              setNewBorrowerEmail(f.email);
-                              setNewBorrowerName(f.name);
-                            }}
-                          >
-                            <div className="flex flex-col">
-                              <span className="text-sm font-medium">{f.name}</span>
-                              <span className="text-[10px] text-ink-dim">{f.email}</span>
-                            </div>
-                          </Button>
-                        ))}
+                    <PopoverContent className="w-64 p-3 bg-gray-900 border-gray-800 rounded-xl shadow-lg">
+                      <div className="space-y-3">
+                        <div className="relative">
+                          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4" />
+                          <Input 
+                            placeholder="Search friends..." 
+                            className="bg-gray-800 border-none h-10 rounded-xl pl-9 pr-4 py-2 text-sm text-gray-100 placeholder:text-gray-500 focus-visible:ring-1 focus-visible:ring-accent"
+                            value={dropdownSearchQuery}
+                            onChange={(e) => setDropdownSearchQuery(e.target.value)}
+                          />
+                        </div>
+                        <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1 pr-1">
+                          {friends.filter(f => f.status === 'ACCEPTED').length === 0 ? (
+                            <div className="text-xs text-gray-500 italic px-2 py-2">No friends added yet.</div>
+                          ) : friends.filter(f => f.status === 'ACCEPTED' && (f?.name?.toLowerCase().includes(dropdownSearchQuery.toLowerCase()) || f?.email?.toLowerCase().includes(dropdownSearchQuery.toLowerCase()))).length === 0 ? (
+                            <div className="text-xs text-gray-500 italic px-2 py-2">No friends found.</div>
+                          ) : (
+                            friends
+                              .filter(f => f.status === 'ACCEPTED' && (f?.name?.toLowerCase().includes(dropdownSearchQuery.toLowerCase()) || f?.email?.toLowerCase().includes(dropdownSearchQuery.toLowerCase())))
+                              .map(f => (
+                                <div 
+                                  key={f.id} 
+                                  className="w-full flex flex-col justify-start text-left px-4 py-2 rounded-lg hover:bg-gray-700 cursor-pointer transition-colors"
+                                  onClick={() => {
+                                    setNewBorrowerEmail(f.email);
+                                    setNewBorrowerName(f.name);
+                                    setIsSelectFriendOpen(false);
+                                  }}
+                                >
+                                  <span className="text-sm font-medium text-gray-100">{f.name}</span>
+                                  {f.email && <span className="text-[10px] text-gray-400">{f.email}</span>}
+                                </div>
+                              ))
+                          )}
+                        </div>
                       </div>
                     </PopoverContent>
                   </Popover>
