@@ -3,6 +3,13 @@ import { createServer as createViteServer } from "vite";
 import path from "path";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
+import express from "express";
+import path from "path";
+
+const app = express();
+
+// ✅ ADD THIS
+app.use(express.static("public"));
 
 dotenv.config();
 
