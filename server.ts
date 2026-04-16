@@ -11,6 +11,7 @@ async function startServer() {
   const PORT = 3000;
 
   app.use(express.json());
+  app.use(express.static(path.join(process.cwd(), "public")));
 
   // API Route for notifications
   app.post("/api/notify", async (req, res) => {
