@@ -1,15 +1,15 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
-import path from "path";
-import nodemailer from "nodemailer";
-import dotenv from "dotenv";
-import express from "express";
 import path from "path";
 
 const app = express();
 
-// ✅ ADD THIS
-app.use(express.static("public"));
+// ✅ VERY IMPORTANT (this line fixes everything)
+app.use(express.static(path.join(process.cwd(), "public")));
+import express from "express";
+import { createServer as createViteServer } from "vite";
+import path from "path";
+import nodemailer from "nodemailer";
+import dotenv from "dotenv";
 
 dotenv.config();
 
