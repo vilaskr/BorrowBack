@@ -1,0 +1,10 @@
+{
+  "routes": [
+    { "src": "/favicon.ico", "dest": "/public/favicon.ico" },
+    { "src": "/favicon-32x32.png", "dest": "/public/favicon-32x32.png" },
+    { "src": "/favicon-16x16.png", "dest": "/public/favicon-16x16.png" },
+    { "src": "/apple-touch-icon.png", "dest": "/public/apple-touch-icon.png" },
+    { "src": "/site.webmanifest", "dest": "/public/site.webmanifest" },
+    { "src": "/(.*)", "dest": "/" }
+  ]
+}
