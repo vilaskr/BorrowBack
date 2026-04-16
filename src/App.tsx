@@ -714,8 +714,11 @@ export default function App() {
         <div className="flex items-center gap-3">
           <Dialog open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
             <DialogTrigger render={
-              <Button variant="ghost" size="icon" className="text-accent rounded-full hover:bg-accent/10">
-                <Users className="w-6 h-6" />
+              <Button variant="ghost" size="icon" className="text-accent rounded-full hover:bg-accent/10 p-0">
+                <Avatar className="w-8 h-8 border border-accent rounded-full">
+                  <AvatarImage src={user?.photoURL || undefined} className="rounded-full" />
+                  <AvatarFallback className="rounded-full bg-surface-alt text-accent">{user?.name?.[0] || '?'}</AvatarFallback>
+                </Avatar>
               </Button>
             } />
             <DialogContent className="bg-bg border-none text-ink p-8 h-[90vh] w-[90vw] max-w-sm rounded-3xl overflow-y-auto">
@@ -750,10 +753,6 @@ export default function App() {
           <h1 className="font-serif italic text-2xl text-accent">BorrowBack</h1>
         </div>
         <div className="flex items-center gap-3">
-          <Avatar className="w-8 h-8 border border-accent rounded-full">
-            <AvatarImage src={user?.photoURL || undefined} className="rounded-full" />
-            <AvatarFallback className="rounded-full bg-surface-alt text-accent">{user?.name?.[0] || '?'}</AvatarFallback>
-          </Avatar>
         </div>
       </header>
 
