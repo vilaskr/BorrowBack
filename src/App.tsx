@@ -188,6 +188,9 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
+  const lenderEntriesRef = React.useRef<BorrowEntry[]>([]);
+  const borrowerEntriesRef = React.useRef<BorrowEntry[]>([]);
+
   useEffect(() => {
     if (!user) {
       setEntries([]);
@@ -197,25 +200,19 @@ export default function App() {
     // Listen for entries where user is lender
     const qLender = query(collection(db, 'borrowEntries'), where('lenderID', '==', user.uid));
     const unsubscribeLender = onSnapshot(qLender, (snapshot) => {
-      const lenderEntries = snapshot.docs
+      lenderEntriesRef.current = snapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry))
         .filter(e => !e.hiddenByLender);
-      setEntries(prev => {
-        const otherEntries = prev.filter(e => e.lenderID !== user.uid);
-        return [...otherEntries, ...lenderEntries];
-      });
+      setEntries([...lenderEntriesRef.current, ...borrowerEntriesRef.current]);
     }, (error) => console.error("Lender listener error:", error));
 
     // Listen for entries where user is borrower (by email)
     const qBorrower = query(collection(db, 'borrowEntries'), where('borrowerEmail', '==', user.email));
     const unsubscribeBorrower = onSnapshot(qBorrower, (snapshot) => {
-      const borrowerEntries = snapshot.docs
+      borrowerEntriesRef.current = snapshot.docs
         .map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry))
         .filter(e => !e.hiddenByBorrower);
-      setEntries(prev => {
-        const otherEntries = prev.filter(e => e.borrowerEmail !== user.email);
-        return [...otherEntries, ...borrowerEntries];
-      });
+      setEntries([...lenderEntriesRef.current, ...borrowerEntriesRef.current]);
     }, (error) => console.error("Borrower listener error:", error));
 
     // Listen for friends
@@ -772,17 +769,17 @@ export default function App() {
         </div>
 
         <Tabs defaultValue="given" className="w-full">
-          <TabsList className="w-full flex items-center justify-center rounded-full bg-gray-800/60 backdrop-blur-md p-1 mb-10 border-none">
+          <TabsList className="w-full flex items-center justify-center rounded-full bg-gray-800/60 backdrop-blur-md p-1 gap-1 mb-10 border-none">
             <TabsTrigger
   value="given"
   className="
     flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-full py-2.5 text-sm transition-all duration-200
     
-    text-gray-400 hover:text-white hover:bg-white/10
+    text-gray-400 hover:text-white hover:bg-white/10 font-medium
     
     data-[state=active]:bg-white 
     data-[state=active]:text-black 
-    data-[state=active]:font-semibold
+    data-[state=active]:font-bold
     data-[state=active]:hover:bg-white
     data-[state=active]:hover:text-black
   "
@@ -794,11 +791,11 @@ export default function App() {
   className="
     flex-1 inline-flex items-center justify-center whitespace-nowrap rounded-full py-2.5 text-sm transition-all duration-200
     
-    text-gray-400 hover:text-white hover:bg-white/10
+    text-gray-400 hover:text-white hover:bg-white/10 font-medium
     
     data-[state=active]:bg-white 
     data-[state=active]:text-black 
-    data-[state=active]:font-semibold
+    data-[state=active]:font-bold
     data-[state=active]:hover:bg-white
     data-[state=active]:hover:text-black
   "
