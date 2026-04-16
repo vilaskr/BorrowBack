@@ -1,11 +1,4 @@
 import express from "express";
-import path from "path";
-
-const app = express();
-
-// ✅ VERY IMPORTANT (this line fixes everything)
-app.use(express.static(path.join(process.cwd(), "public")));
-import express from "express";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import nodemailer from "nodemailer";
