@@ -24,7 +24,9 @@ import {
   updateDoc,
   Timestamp,
   writeBatch,
-  deleteDoc
+  deleteDoc,
+  handleFirestoreError,
+  OperationType
 } from './firebase';
 import { UserProfile, BorrowEntry, EntryStatus, Friend } from './types';
 import { Button } from '@/components/ui/button';
@@ -168,16 +170,30 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       if (firebaseUser) {
+        setLoading(true);
         const userProfile: UserProfile = {
           uid: firebaseUser.uid,
           name: firebaseUser.displayName || 'Anonymous',
           email: firebaseUser.email || '',
-          photoURL: firebaseUser.photoURL || undefined,
         };
+        
+        if (firebaseUser.photoURL) {
+          userProfile.photoURL = firebaseUser.photoURL;
+        }
+
         setUser(userProfile);
         
-        // Save user to Firestore
-        await setDoc(doc(db, 'users', firebaseUser.uid), userProfile, { merge: true });
+        // Save user to Firestore with error handling
+        try {
+          // Use setDoc with merge to ensure we don't overwrite custom data like badges
+          await setDoc(doc(db, 'users', firebaseUser.uid), userProfile, { merge: true });
+        } catch (error) {
+          console.error("Critical: Failed to sync user profile to Firestore database:", error);
+          // Here we can use handleFirestoreError if we want to crash/show error boundary
+          // but for basic login we'll just log and continue for now so they can use the app
+          // provided the rules allow them to do other things.
+          toast.error("Account sync failed. Some features may be restricted.");
+        }
       } else {
         setUser(null);
       }
@@ -330,8 +346,7 @@ export default function App() {
       setFriendName('');
       setFriendEmail('');
     } catch (error) {
-      console.error('Add friend error:', error);
-      toast.error('Failed to send friend request');
+      handleFirestoreError(error, OperationType.WRITE, 'friends');
     }
   };
 
@@ -446,8 +461,7 @@ export default function App() {
       setIsMonetary(false);
       setTotalAmount('');
     } catch (error) {
-      console.error('Lend error:', error);
-      toast.error('Failed to send request');
+      handleFirestoreError(error, OperationType.WRITE, 'borrowEntries');
     } finally {
       setIsSubmitting(false);
     }
@@ -811,8 +825,8 @@ export default function App() {
                   animate={{ opacity: 1 }}
                   className="col-span-full py-32 flex flex-col items-center justify-center text-center space-y-4"
                 >
-                  <div className="w-16 h-16 bg-surface-alt rounded-full flex items-center justify-center text-accent/40">
-                    <ArrowUpRight className="w-8 h-8" />
+                  <div className="w-20 h-20 bg-accent/10 rounded-full flex items-center justify-center text-accent mb-2">
+                    <ArrowUpRight className="w-10 h-10" />
                   </div>
                   <div className="space-y-1">
                     <h3 className="text-xl font-medium text-ink">Nothing lent yet</h3>
@@ -845,8 +859,8 @@ export default function App() {
                   animate={{ opacity: 1 }}
                   className="col-span-full py-32 flex flex-col items-center justify-center text-center space-y-4"
                 >
-                  <div className="w-16 h-16 bg-surface-alt rounded-full flex items-center justify-center text-accent/40">
-                    <Users className="w-8 h-8" />
+                  <div className="w-20 h-20 bg-accent/10 rounded-full flex items-center justify-center text-accent mb-2">
+                    <Users className="w-10 h-10" />
                   </div>
                   <div className="space-y-1">
                     <h3 className="text-xl font-medium text-ink">Nothing borrowed yet</h3>
@@ -1016,6 +1030,7 @@ export default function App() {
                     onSelect={setNewReturnDate}
                     initialFocus
                     className="bg-surface text-ink"
+                    disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
                   />
                 </PopoverContent>
               </Popover>
@@ -1376,9 +1391,9 @@ function EntryCard({
         whileHover={{ scale: 1.01, y: -2 }}
         whileTap={{ scale: 0.98 }}
         onClick={() => setIsDetailOpen(true)}
-        className="cursor-pointer"
+        className="cursor-pointer h-full"
       >
-        <Card className="bg-surface border-surface-alt rounded-3xl p-6 h-auto min-h-[220px] flex flex-col justify-between shadow-sm shadow-black/5 hover:border-accent/30 transition-all duration-200 group relative overflow-hidden">
+        <Card className="bg-surface border-surface-alt rounded-3xl p-6 h-full flex flex-col justify-between shadow-sm shadow-black/5 hover:border-accent/30 transition-all duration-200 group relative overflow-hidden">
           <div className="flex justify-between items-start mb-4">
             <div className="space-y-1">
               <h3 className="text-xl font-medium text-ink flex items-center gap-2">
@@ -1596,10 +1611,10 @@ function EntryCard({
             <div className="flex flex-col gap-3 pt-4">
               {!isLender && entry.status === 'REQUESTED' && (
                 <div className="grid grid-cols-2 gap-3">
-                  <Button onClick={() => onUpdateStatus(entry.id, 'ACTIVE', { borrowerID: currentUserId })} className="bg-accent text-bg rounded-full h-12 font-semibold">
+                  <Button onClick={() => { onUpdateStatus(entry.id, 'ACTIVE', { borrowerID: currentUserId }); setIsDetailOpen(false); }} className="bg-accent text-bg rounded-full h-12 font-semibold">
                     Accept Request
                   </Button>
-                  <Button variant="ghost" onClick={() => onUpdateStatus(entry.id, 'CANCELLED')} className="text-ink-dim rounded-full h-12">
+                  <Button variant="ghost" onClick={() => { onUpdateStatus(entry.id, 'CANCELLED'); setIsDetailOpen(false); }} className="text-ink-dim rounded-full h-12">
                     Reject
                   </Button>
                 </div>

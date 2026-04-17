@@ -64,8 +64,9 @@ service cloud.firestore {
     function isValidUser(data) {
       return data.keys().hasAll(['uid', 'name', 'email']) &&
              data.uid is string && data.uid.size() > 0 &&
-             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.email is string && data.email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+             data.name is string && data.name.size() > 0 && data.name.size() < 255 &&
+             data.email is string && data.email.size() > 5 &&
+             (!('photoURL' in data) || data.photoURL is string);
     }
 
     function isValidBorrowEntry(data) {
