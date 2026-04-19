@@ -70,13 +70,12 @@ service cloud.firestore {
     }
 
     function isValidBorrowEntry(data) {
-      return data.keys().hasAll(['itemName', 'borrowerEmail', 'status', 'createdAt']) &&
+      return data.keys().hasAll(['itemName', 'lenderID', 'lenderEmail', 'borrowerEmail', 'status', 'createdAt']) &&
              data.itemName is string && data.itemName.size() > 0 && data.itemName.size() < 200 &&
+             data.lenderID is string &&
+             data.lenderEmail is string &&
              data.borrowerEmail is string &&
-             data.status in ['REQUESTED', 'ACTIVE', 'RETURN_REQUESTED', 'RETURNED', 'CANCELLED'] &&
-             (!('lenderID' in data) || data.lenderID is string) &&
-             (!('entryType' in data) || data.entryType in ['lent', 'borrowed']) &&
-             (!('isPendingSync' in data) || data.isPendingSync is bool);
+             data.status in ['REQUESTED', 'ACTIVE', 'RETURN_REQUESTED', 'RETURNED', 'CANCELLED'];
     }
 
     function isValidFriend(data) {
@@ -103,10 +102,7 @@ service cloud.firestore {
       allow read: if isAuthenticated() && (isLender(resource.data) || isBorrower(resource.data));
       
       allow create: if isAuthenticated() && 
-                      (
-                        (request.resource.data.get('entryType', 'lent') == 'lent' && request.resource.data.lenderID == request.auth.uid) ||
-                        (request.resource.data.get('entryType', 'lent') == 'borrowed' && request.resource.data.borrowerID == request.auth.uid)
-                      ) &&
+                      request.resource.data.lenderID == request.auth.uid &&
                       isValidBorrowEntry(request.resource.data);
 
       allow update: if isAuthenticated() && 

@@ -23,9 +23,6 @@ export interface BorrowEntry {
   isMonetary?: boolean;
   hiddenByLender?: boolean;
   hiddenByBorrower?: boolean;
-  entryType?: 'lent' | 'borrowed'; // Who initiated the entry
-  isPendingSync?: boolean; // True if created by borrower and lender UID is unknown
-  sharedTransactionId?: string; // To link related entries if necessary, or just trace
 }
 
 export interface Friend {

@@ -35,12 +35,9 @@
         "lastReminderSentAt": { "type": "string", "format": "date-time" },
         "totalAmount": { "type": "number" },
         "returnedAmount": { "type": "number" },
-        "isMonetary": { "type": "boolean" },
-        "entryType": { "type": "string", "enum": ["lent", "borrowed"] },
-        "isPendingSync": { "type": "boolean" },
-        "sharedTransactionId": { "type": "string" }
+        "isMonetary": { "type": "boolean" }
       },
-      "required": ["itemName", "borrowerEmail", "status", "createdAt"]
+      "required": ["itemName", "lenderID", "borrowerEmail", "status", "createdAt"]
     },
     "Friend": {
       "title": "Friend",

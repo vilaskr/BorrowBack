@@ -32,7 +32,7 @@ function Calendar({
       showOutsideDays={showOutsideDays}
       fixedWeeks={true}
       className={cn(
-        "group/calendar p-3 bg-surface rounded-2xl border border-surface-alt [--cell-radius:var(--radius-xl)] [--cell-size:3.5rem] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent",
+        "group/calendar bg-background p-4 rounded-2xl shadow-lg border border-surface-alt [--cell-radius:var(--radius-md)] [--cell-size:--spacing(9)] in-data-[slot=card-content]:bg-transparent in-data-[slot=popover-content]:bg-transparent",
         String.raw`rtl:**:[.rdp-button\_next>svg]:rotate-180`,
         String.raw`rtl:**:[.rdp-button\_previous>svg]:rotate-180`,
         className
@@ -57,16 +57,16 @@ function Calendar({
         ),
         button_previous: cn(
           buttonVariants({ variant: buttonVariant }),
-          "size-10 p-0 text-accent hover:bg-accent/10 border-none transition-colors aria-disabled:opacity-20",
+          "size-(--cell-size) p-0 select-none aria-disabled:opacity-50",
           defaultClassNames.button_previous
         ),
         button_next: cn(
           buttonVariants({ variant: buttonVariant }),
-          "size-10 p-0 text-accent hover:bg-accent/10 border-none transition-colors aria-disabled:opacity-20",
+          "size-(--cell-size) p-0 select-none aria-disabled:opacity-50",
           defaultClassNames.button_next
         ),
         month_caption: cn(
-          "flex h-10 w-full items-center justify-center font-serif italic text-lg text-accent",
+          "flex h-(--cell-size) w-full items-center justify-center px-(--cell-size)",
           defaultClassNames.month_caption
         ),
         dropdowns: cn(
@@ -104,11 +104,23 @@ function Calendar({
           defaultClassNames.week_number
         ),
         day: cn(
-          "group/day relative aspect-square h-10 w-10 text-center text-sm p-0 rounded-full transition-all hover:bg-accent/10 hover:text-accent data-[selected=true]:bg-accent data-[selected=true]:text-bg data-[selected=true]:font-bold",
+          "group/day relative aspect-square h-full w-full rounded-(--cell-radius) p-0 text-center select-none [&:last-child[data-selected=true]_button]:rounded-r-(--cell-radius)",
+          props.showWeekNumber
+            ? "[&:nth-child(2)[data-selected=true]_button]:rounded-l-(--cell-radius)"
+            : "[&:first-child[data-selected=true]_button]:rounded-l-(--cell-radius)",
           defaultClassNames.day
         ),
+        range_start: cn(
+          "relative isolate z-0 rounded-l-(--cell-radius) bg-muted after:absolute after:inset-y-0 after:right-0 after:w-4 after:bg-muted",
+          defaultClassNames.range_start
+        ),
+        range_middle: cn("rounded-none", defaultClassNames.range_middle),
+        range_end: cn(
+          "relative isolate z-0 rounded-r-(--cell-radius) bg-muted after:absolute after:inset-y-0 after:left-0 after:w-4 after:bg-muted",
+          defaultClassNames.range_end
+        ),
         today: cn(
-          "relative after:absolute after:bottom-1 after:left-1/2 after:-translate-x-1/2 after:w-1 after:h-1 after:bg-accent after:rounded-full",
+          "rounded-(--cell-radius) bg-muted text-foreground data-[selected=true]:rounded-none",
           defaultClassNames.today
         ),
         outside: cn(

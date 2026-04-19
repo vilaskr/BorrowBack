@@ -69,26 +69,16 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [friendSearchQuery, setFriendSearchQuery] = useState('');
   const [isLendDialogOpen, setIsLendDialogOpen] = useState(false);
-  const [isBorrowDialogOpen, setIsBorrowDialogOpen] = useState(false);
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isClearInventoryOpen, setIsClearInventoryOpen] = useState(false);
   const [dropdownSearchQuery, setDropdownSearchQuery] = useState('');
   const [isSelectFriendOpen, setIsSelectFriendOpen] = useState(false);
   const [loadingFriends, setLoadingFriends] = useState(true);
-  const [scrolled, setScrolled] = useState(false);
 
   // Track seen reminders to avoid duplicate toasts
   const seenReminders = React.useRef<Set<string>>(new Set());
   const notificationSounds = React.useRef<Record<string, HTMLAudioElement>>({});
-
-  useEffect(() => {
-    const handleScroll = () => {
-      setScrolled(window.scrollY > 10);
-    };
-    window.addEventListener('scroll', handleScroll, { passive: true });
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, []);
 
   useEffect(() => {
     const sounds = {
@@ -166,8 +156,6 @@ export default function App() {
   const [newItemName, setNewItemName] = useState('');
   const [newBorrowerEmail, setNewBorrowerEmail] = useState('');
   const [newBorrowerName, setNewBorrowerName] = useState('');
-  const [newLenderEmail, setNewLenderEmail] = useState('');
-  const [newLenderName, setNewLenderName] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [newReturnDate, setNewReturnDate] = useState<Date | undefined>(undefined);
   const [isMonetary, setIsMonetary] = useState(false);
@@ -194,53 +182,6 @@ export default function App() {
         }
 
         setUser(userProfile);
-
-        // Required: Auto-sync pending entries where this user is either the lender or borrower
-        try {
-          const lEmail = userProfile.email.toLowerCase().trim();
-          
-          // 1. Sync as Lender
-          const qSyncLender = query(
-            collection(db, 'borrowEntries'), 
-            where('lenderEmail', '==', lEmail),
-            where('isPendingSync', '==', true)
-          );
-          const syncLSnapshot = await getDocs(qSyncLender);
-          if (!syncLSnapshot.empty) {
-            const batch = writeBatch(db);
-            syncLSnapshot.docs.forEach(syncDoc => {
-              batch.update(syncDoc.ref, {
-                lenderID: userProfile.uid,
-                lenderName: userProfile.name,
-                isPendingSync: false
-              });
-            });
-            await batch.commit();
-            toast.success(`Synced ${syncLSnapshot.size} lending records found via your email!`);
-          }
-
-          // 2. Sync as Borrower
-          const qSyncBorrower = query(
-            collection(db, 'borrowEntries'),
-            where('borrowerEmail', '==', lEmail),
-            where('isPendingSync', '==', true)
-          );
-          const syncBSnapshot = await getDocs(qSyncBorrower);
-          if (!syncBSnapshot.empty) {
-            const batch = writeBatch(db);
-            syncBSnapshot.docs.forEach(syncDoc => {
-              batch.update(syncDoc.ref, {
-                borrowerID: userProfile.uid,
-                borrowerName: userProfile.name,
-                isPendingSync: false
-              });
-            });
-            await batch.commit();
-            toast.success(`Synced ${syncBSnapshot.size} borrowed records found via your email!`);
-          }
-        } catch (syncError) {
-          console.error("Auto-sync error during login:", syncError);
-        }
         
         // Save user to Firestore with error handling
         try {
@@ -272,53 +213,23 @@ export default function App() {
       return;
     }
 
-    const userEmail = (user.email || '').toLowerCase().trim();
-
-    // Listen for entries where user is lender (by ID or email)
-    const qLenderByID = query(collection(db, 'borrowEntries'), where('lenderID', '==', user.uid));
-    const qLenderByEmail = query(collection(db, 'borrowEntries'), where('lenderEmail', '==', userEmail));
-    
-    let lenderEmailEntries: BorrowEntry[] = [];
-    let lenderIDEntries: BorrowEntry[] = [];
-
-    const updateAllEntries = () => {
-      const uEmail = userEmail;
-      const allLender = Array.from(new Map([...lenderEmailEntries, ...lenderIDEntries].map(item => [item.id, item])).values())
+    // Listen for entries where user is lender
+    const qLender = query(collection(db, 'borrowEntries'), where('lenderID', '==', user.uid));
+    const unsubscribeLender = onSnapshot(qLender, (snapshot) => {
+      lenderEntriesRef.current = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry))
         .filter(e => !e.hiddenByLender);
-      const allBorrower = Array.from(new Map([...borrowerEmailEntries, ...borrowerIDEntries].map(item => [item.id, item])).values())
+      setEntries([...lenderEntriesRef.current, ...borrowerEntriesRef.current]);
+    }, (error) => console.error("Lender listener error:", error));
+
+    // Listen for entries where user is borrower (by email)
+    const qBorrower = query(collection(db, 'borrowEntries'), where('borrowerEmail', '==', user.email));
+    const unsubscribeBorrower = onSnapshot(qBorrower, (snapshot) => {
+      borrowerEntriesRef.current = snapshot.docs
+        .map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry))
         .filter(e => !e.hiddenByBorrower);
-      
-      lenderEntriesRef.current = allLender;
-      borrowerEntriesRef.current = allBorrower;
-      setEntries([...allLender, ...allBorrower]);
-    };
-
-    const unsubscribeLenderID = onSnapshot(qLenderByID, (snapshot) => {
-      lenderIDEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
-      updateAllEntries();
-    }, (error) => console.error("Lender ID listener error:", error));
-
-    const unsubscribeLenderEmail = onSnapshot(qLenderByEmail, (snapshot) => {
-      lenderEmailEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
-      updateAllEntries();
-    }, (error) => console.error("Lender Email listener error:", error));
-
-    // Listen for entries where user is borrower (by email or ID)
-    const qBorrowerByEmail = query(collection(db, 'borrowEntries'), where('borrowerEmail', '==', userEmail));
-    const qBorrowerByID = query(collection(db, 'borrowEntries'), where('borrowerID', '==', user.uid));
-    
-    let borrowerEmailEntries: BorrowEntry[] = [];
-    let borrowerIDEntries: BorrowEntry[] = [];
-
-    const unsubscribeBorrowerEmail = onSnapshot(qBorrowerByEmail, (snapshot) => {
-      borrowerEmailEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
-      updateAllEntries();
-    }, (error) => console.error("Borrower email listener error:", error));
-
-    const unsubscribeBorrowerID = onSnapshot(qBorrowerByID, (snapshot) => {
-      borrowerIDEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
-      updateAllEntries();
-    }, (error) => console.error("Borrower ID listener error:", error));
+      setEntries([...lenderEntriesRef.current, ...borrowerEntriesRef.current]);
+    }, (error) => console.error("Borrower listener error:", error));
 
     // Listen for friends
     const qFriends = query(collection(db, 'friends'), where('addedBy', '==', user.uid));
@@ -329,17 +240,15 @@ export default function App() {
     });
 
     // Listen for friend requests
-    const qRequests = query(collection(db, 'friends'), where('email', '==', user.email.toLowerCase().trim()), where('status', '==', 'PENDING'));
+    const qRequests = query(collection(db, 'friends'), where('email', '==', user.email), where('status', '==', 'PENDING'));
     const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
       const requestsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Friend));
       setFriendRequests(requestsList);
     });
 
     return () => {
-      unsubscribeLenderID();
-      unsubscribeLenderEmail();
-      unsubscribeBorrowerEmail();
-      unsubscribeBorrowerID();
+      unsubscribeLender();
+      unsubscribeBorrower();
       unsubscribeFriends();
       unsubscribeRequests();
     };
@@ -528,14 +437,12 @@ export default function App() {
         lenderEmail: user.email,
         lenderName: user.name,
         borrowerEmail: newBorrowerEmail.toLowerCase().trim(),
-        borrowerName: newBorrowerName || 'Unknown Borrower',
+        borrowerName: newBorrowerName,
         status: 'REQUESTED',
         createdAt: serverTimestamp(),
         notes: newNotes,
         returnDate: newReturnDate ? Timestamp.fromDate(newReturnDate) : null,
         isMonetary: isMonetary,
-        entryType: 'lent',
-        isPendingSync: true,
       };
 
       if (isMonetary) {
@@ -549,60 +456,6 @@ export default function App() {
       setNewItemName('');
       setNewBorrowerEmail('');
       setNewBorrowerName('');
-      setNewNotes('');
-      setNewReturnDate(undefined);
-      setIsMonetary(false);
-      setTotalAmount('');
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, 'borrowEntries');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleBorrowItem = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user || !newItemName || !newLenderEmail) return;
-
-    setIsSubmitting(true);
-    if (isMonetary) {
-      const parsedAmount = parseFloat(totalAmount);
-      if (isNaN(parsedAmount) || parsedAmount <= 0) {
-        toast.error('Please enter a valid total amount');
-        setIsSubmitting(false);
-        return;
-      }
-    }
-
-    try {
-      const newEntry: any = {
-        itemName: newItemName,
-        borrowerEmail: user.email,
-        borrowerName: user.name,
-        borrowerID: user.uid,
-        lenderEmail: newLenderEmail.toLowerCase().trim(),
-        lenderName: newLenderName || 'Unknown Lender',
-        status: 'REQUESTED',
-        createdAt: serverTimestamp(),
-        notes: newNotes,
-        returnDate: newReturnDate ? Timestamp.fromDate(newReturnDate) : null,
-        isMonetary: isMonetary,
-        entryType: 'borrowed',
-        isPendingSync: true,
-        sharedTransactionId: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
-      };
-
-      if (isMonetary) {
-        newEntry.totalAmount = parseFloat(totalAmount);
-        newEntry.returnedAmount = 0;
-      }
-
-      await addDoc(collection(db, 'borrowEntries'), newEntry);
-      toast.success('Successfully recorded borrowed item!');
-      setIsBorrowDialogOpen(false);
-      setNewItemName('');
-      setNewLenderEmail('');
-      setNewLenderName('');
       setNewNotes('');
       setNewReturnDate(undefined);
       setIsMonetary(false);
@@ -689,9 +542,8 @@ export default function App() {
     if (!user) return;
     
     try {
-      const uEmail = user.email.toLowerCase().trim();
-      const myLent = entries.filter(e => (e.lenderID === user.uid || e.lenderEmail === uEmail) && !e.hiddenByLender);
-      const myBorrowed = entries.filter(e => (e.borrowerEmail === uEmail || e.borrowerID === user.uid) && !e.hiddenByBorrower);
+      const myLent = entries.filter(e => e.lenderID === user.uid && !e.hiddenByLender);
+      const myBorrowed = entries.filter(e => e.borrowerEmail === user.email && !e.hiddenByBorrower);
       const allToHide = [...myLent, ...myBorrowed];
       
       if (allToHide.length === 0) {
@@ -705,8 +557,8 @@ export default function App() {
 
       uniqueEntries.forEach((entry, id) => {
         const updates: any = {};
-        if (entry.lenderID === user.uid || entry.lenderEmail === uEmail) updates.hiddenByLender = true;
-        if (entry.borrowerEmail === uEmail || entry.borrowerID === user.uid) updates.hiddenByBorrower = true;
+        if (entry.lenderID === user.uid) updates.hiddenByLender = true;
+        if (entry.borrowerEmail === user.email) updates.hiddenByBorrower = true;
         batch.update(doc(db, 'borrowEntries', id), updates);
       });
       await batch.commit();
@@ -742,12 +594,10 @@ export default function App() {
   };
 
   const filteredEntries = useMemo(() => {
-    const query = searchQuery.toLowerCase();
     return entries.filter(entry => 
-      (entry.itemName || '').toLowerCase().includes(query) ||
-      (entry.lenderName || '').toLowerCase().includes(query) ||
-      (entry.borrowerEmail || '').toLowerCase().includes(query) ||
-      (entry.borrowerName || '').toLowerCase().includes(query)
+      entry.itemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      entry.lenderName.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      entry.borrowerEmail.toLowerCase().includes(searchQuery.toLowerCase())
     ).sort((a, b) => {
       const dateA = a.createdAt?.seconds || 0;
       const dateB = b.createdAt?.seconds || 0;
@@ -755,24 +605,21 @@ export default function App() {
     });
   }, [entries, searchQuery]);
 
-  const uEmail = (user?.email || '').toLowerCase().trim();
-  const givenEntries = filteredEntries.filter(e => e.lenderID === user?.uid || (e.lenderEmail || '').toLowerCase().trim() === uEmail);
-  const takenEntries = filteredEntries.filter(e => (e.borrowerEmail || '').toLowerCase().trim() === uEmail || e.borrowerID === user?.uid);
+  const givenEntries = filteredEntries.filter(e => e.lenderID === user?.uid);
+  const takenEntries = filteredEntries.filter(e => e.borrowerEmail === user?.email);
 
   const lenderIntegrity = useMemo(() => {
-    const uEmail = user?.email.toLowerCase().trim();
-    const myLentItems = entries.filter(e => e.lenderID === user?.uid || e.lenderEmail === uEmail);
+    const myLentItems = entries.filter(e => e.lenderID === user?.uid);
     if (myLentItems.length === 0) return 100;
     const returnedItems = myLentItems.filter(e => e.status === 'RETURNED').length;
     return Math.round((returnedItems / myLentItems.length) * 100);
   }, [entries, user]);
 
   const activeLoansCount = useMemo(() => {
-    const uEmail = user?.email.toLowerCase().trim();
     return entries.filter(e => 
       e.status !== 'RETURNED' && 
       e.status !== 'CANCELLED' && 
-      (e.lenderID === user?.uid || e.lenderEmail === uEmail || e.borrowerEmail === uEmail || e.borrowerID === user?.uid)
+      (e.lenderID === user?.uid || e.borrowerEmail === user?.email)
     ).length;
   }, [entries, user]);
 
@@ -890,19 +737,11 @@ export default function App() {
           handleRejectFriendRequest={handleRejectFriendRequest}
           onOpenClearInventory={() => setIsClearInventoryOpen(true)}
           handleLogout={handleLogout}
-          isLendDialogOpen={isLendDialogOpen}
-          setIsLendDialogOpen={setIsLendDialogOpen}
-          isBorrowDialogOpen={isBorrowDialogOpen}
-          setIsBorrowDialogOpen={setIsBorrowDialogOpen}
         />
       </aside>
 
       {/* Mobile Header */}
-      <header className={cn(
-        "lg:hidden sticky top-0 z-50 flex items-center justify-between px-6 py-4 border-b scroll-surface",
-        scrolled ? "scroll-surface" : "bg-transparent border-transparent"
-      )} data-scrolled={scrolled}>
-        <div className="absolute inset-0 feathery-blur pointer-events-none -z-10" />
+      <header className="lg:hidden sticky top-0 z-10 bg-bg/80 backdrop-blur-md border-b border-surface-alt px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Dialog open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
             <DialogTrigger render={
@@ -940,10 +779,6 @@ export default function App() {
                   setIsClearInventoryOpen(true);
                 }}
                 handleLogout={handleLogout}
-                isLendDialogOpen={isLendDialogOpen}
-                setIsLendDialogOpen={setIsLendDialogOpen}
-                isBorrowDialogOpen={isBorrowDialogOpen}
-                setIsBorrowDialogOpen={setIsBorrowDialogOpen}
               />
             </DialogContent>
           </Dialog>
@@ -962,41 +797,6 @@ export default function App() {
           <div className="text-ink-dim text-sm hidden sm:block">
             {format(new Date(), "MMM d, yyyy")}
           </div>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-4 mb-12">
-          <motion.button
-            whileHover={{ scale: 1.02, translateY: -4 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => setIsLendDialogOpen(true)}
-            className="flex-1 group relative overflow-hidden bg-accent text-bg p-8 rounded-[2.5rem] flex items-center justify-between border-none shadow-xl shadow-accent/20 active:shadow-none transition-all"
-          >
-            <div className="relative z-10 text-left">
-              <span className="text-[10px] uppercase tracking-[3px] font-bold opacity-60">Granting Usage</span>
-              <h2 className="text-3xl font-serif italic mt-1">Lend Item</h2>
-              <p className="text-[10px] uppercase tracking-[1px] mt-2 opacity-40">Track your belongings</p>
-            </div>
-            <div className="relative z-10 w-14 h-14 rounded-full bg-bg/20 flex items-center justify-center backdrop-blur-md group-hover:bg-bg/30 transition-colors">
-              <ArrowUpRight className="w-7 h-7" />
-            </div>
-            <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700" />
-          </motion.button>
-
-          <motion.button
-            whileHover={{ scale: 1.02, translateY: -4 }}
-            whileTap={{ scale: 0.98 }}
-            onClick={() => setIsBorrowDialogOpen(true)}
-            className="flex-1 group relative overflow-hidden bg-surface-alt border border-accent/10 text-ink p-8 rounded-[2.5rem] flex items-center justify-between shadow-lg shadow-black/5 active:shadow-none transition-all"
-          >
-            <div className="relative z-10 text-left">
-              <span className="text-[10px] uppercase tracking-[3px] font-bold text-accent opacity-60">Acquiring Need</span>
-              <h2 className="text-3xl font-serif italic mt-1">Borrow Item</h2>
-              <p className="text-[10px] uppercase tracking-[1px] mt-2 text-ink-dim font-medium">Auto-sync enabled</p>
-            </div>
-            <div className="relative z-10 w-14 h-14 rounded-full bg-accent/5 border border-accent/10 flex items-center justify-center backdrop-blur-md group-hover:bg-accent/10 transition-colors">
-              <Plus className="w-7 h-7 text-accent" />
-            </div>
-          </motion.button>
         </div>
 
         <Tabs defaultValue="given" className="w-full">
@@ -1062,7 +862,6 @@ export default function App() {
                     onUpdateStatus={updateEntryStatus}
                     onAskBack={(tone) => handleAskBack(entry, tone)}
                     currentUserId={user.uid}
-                    currentUserName={user.name}
                     friends={friends}
                   />
                 ))
@@ -1097,7 +896,6 @@ export default function App() {
                     onUpdateStatus={updateEntryStatus}
                     onAskBack={() => {}}
                     currentUserId={user.uid}
-                    currentUserName={user.name}
                     friends={friends}
                   />
                 ))
@@ -1107,8 +905,13 @@ export default function App() {
         </Tabs>
       </main>
 
-      {/* Lend Item Dialog */}
+      {/* FAB */}
       <Dialog open={isLendDialogOpen} onOpenChange={setIsLendDialogOpen}>
+        <DialogTrigger render={
+          <Button className="fixed bottom-10 right-10 h-16 w-16 rounded-full bg-accent text-bg shadow-2xl shadow-accent/30 hover:scale-105 transition-transform text-3xl font-light border-none">
+            +
+          </Button>
+        } />
         <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
           <DialogHeader>
             <DialogTitle className="text-2xl font-serif italic text-accent">Lend Item</DialogTitle>
@@ -1221,38 +1024,32 @@ export default function App() {
               </div>
             )}
 
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-xs uppercase tracking-widest text-ink-dim">Return Date</Label>
-                <Popover>
-                  <PopoverTrigger render={
-                    <Button
-                      variant={"outline"}
-                      className={cn(
-                        "w-full h-12 justify-start text-left font-normal bg-surface-alt border-none rounded-xl",
-                        !newReturnDate && "text-ink-dim focus-visible:ring-accent"
-                      )}
-                    >
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {newReturnDate ? format(newReturnDate, "PPP") : <span>Pick a date</span>}
-                    </Button>
-                  } />
-                  <PopoverContent className="w-auto p-0 bg-surface border-surface-alt rounded-2xl shadow-2xl" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={newReturnDate}
-                      onSelect={setNewReturnDate}
-                      initialFocus
-                      className="bg-surface text-ink"
-                      disabled={(date) => {
-                        const today = new Date();
-                        today.setHours(0,0,0,0);
-                        return date < today;
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-widest text-ink-dim">Return Date</Label>
+              <Popover>
+                <PopoverTrigger render={
+                  <Button
+                    variant={"outline"}
+                    className={cn(
+                      "w-full h-12 justify-start text-left font-normal bg-surface-alt border-none rounded-xl",
+                      !newReturnDate && "text-ink-dim"
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4" />
+                    {newReturnDate ? format(newReturnDate, "PPP") : <span>Pick a date</span>}
+                  </Button>
+                } />
+                <PopoverContent className="w-auto p-0 bg-surface border-surface-alt rounded-2xl shadow-2xl" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={newReturnDate}
+                    onSelect={setNewReturnDate}
+                    initialFocus
+                    className="bg-surface text-ink"
+                    disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
             <div className="space-y-2">
               <Label className="text-xs uppercase tracking-widest text-ink-dim">Notes (Optional)</Label>
@@ -1272,97 +1069,6 @@ export default function App() {
           </form>
         </DialogContent>
       </Dialog>
-
-      {/* Borrow Item Dialog */}
-      <Dialog open={isBorrowDialogOpen} onOpenChange={setIsBorrowDialogOpen}>
-        <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-serif italic text-accent">Borrow Item</DialogTitle>
-            <DialogDescription className="text-ink-dim">
-              Track items you've borrowed from others.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleBorrowItem} className="space-y-6 py-4">
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-widest text-ink-dim">Item Name</Label>
-              <Input 
-                placeholder="e.g. Lawn Mower" 
-                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
-                value={newItemName}
-                onChange={(e) => setNewItemName(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-widest text-ink-dim">Lender Email</Label>
-              <Input 
-                type="email"
-                placeholder="lender@example.com" 
-                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
-                value={newLenderEmail}
-                onChange={(e) => setNewLenderEmail(e.target.value)}
-                required
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-widest text-ink-dim">Lender Name (Optional)</Label>
-              <Input 
-                placeholder="e.g. John Doe" 
-                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
-                value={newLenderName}
-                onChange={(e) => setNewLenderName(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-4">
-              <div className="space-y-2">
-                <Label className="text-xs uppercase tracking-widest text-ink-dim">Return Date</Label>
-                <Popover>
-                  <PopoverTrigger render={
-                    <Button variant="outline" className={cn("w-full h-12 justify-start text-left font-normal bg-surface-alt border-none rounded-xl", !newReturnDate && "text-ink-dim focus-visible:ring-accent")}>
-                      <CalendarIcon className="mr-2 h-4 w-4" />
-                      {newReturnDate ? format(newReturnDate, "PPP") : "Select date"}
-                    </Button>
-                  } />
-                  <PopoverContent className="w-auto p-0 bg-surface border-surface-alt rounded-2xl shadow-2xl" align="start">
-                    <Calendar 
-                      mode="single" 
-                      selected={newReturnDate} 
-                      onSelect={setNewReturnDate} 
-                      initialFocus 
-                      className="bg-surface text-ink"
-                      disabled={(date) => {
-                        const today = new Date();
-                        today.setHours(0,0,0,0);
-                        return date < today;
-                      }}
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="space-y-2">
-                <Label className="text-xs uppercase tracking-widest text-ink-dim">Notes (Optional)</Label>
-                <Input 
-                  placeholder="e.g. Mentioned I'd return it by Sunday" 
-                  className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
-                  value={newNotes}
-                  onChange={(e) => setNewNotes(e.target.value)}
-                />
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button type="submit" className="w-full h-14 bg-accent text-bg hover:bg-accent/90 rounded-full font-semibold border-none active:scale-95 transition-all" disabled={isSubmitting}>
-                {isSubmitting ? "Processing..." : "Confirm Borrowed Entry"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
-
       {/* Clear Inventory Dialog (Root Level) */}
       <Dialog open={isClearInventoryOpen} onOpenChange={setIsClearInventoryOpen}>
         <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
@@ -1413,10 +1119,6 @@ interface SidebarContentProps {
   handleRejectFriendRequest: (requestId: string) => Promise<void>;
   onOpenClearInventory: () => void;
   handleLogout: () => Promise<void>;
-  isLendDialogOpen: boolean;
-  setIsLendDialogOpen: (val: boolean) => void;
-  isBorrowDialogOpen: boolean;
-  setIsBorrowDialogOpen: (val: boolean) => void;
 }
 
 const SidebarContent = ({
@@ -1441,11 +1143,7 @@ const SidebarContent = ({
   handleAcceptFriendRequest,
   handleRejectFriendRequest,
   onOpenClearInventory,
-  handleLogout,
-  isLendDialogOpen,
-  setIsLendDialogOpen,
-  isBorrowDialogOpen,
-  setIsBorrowDialogOpen
+  handleLogout
 }: SidebarContentProps) => {
   return (
     <div className="flex flex-col justify-between min-h-full">
@@ -1635,7 +1333,6 @@ interface EntryCardProps {
   onUpdateStatus: (id: string, status: EntryStatus, extra?: any) => Promise<void>;
   onAskBack: (tone: string) => Promise<void> | void;
   currentUserId: string;
-  currentUserName: string;
   friends?: Friend[];
   key?: string;
 }
@@ -1646,7 +1343,6 @@ function EntryCard({
   onUpdateStatus, 
   onAskBack,
   currentUserId,
-  currentUserName,
   friends = []
 }: EntryCardProps) {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -1655,10 +1351,7 @@ function EntryCard({
 
   if (!entry) return null;
 
-  const friend = friends.find(f => 
-    (entry.borrowerEmail && f.email === entry.borrowerEmail) || 
-    (entry.borrowerID && f.email === entry.borrowerEmail) // Assuming emails are stable
-  );
+  const friend = friends.find(f => f.email === entry.borrowerEmail);
   const trustScore = friend?.trustScore;
 
   const returnDate = entry.returnDate?.toDate?.() || null;
@@ -1724,11 +1417,6 @@ function EntryCard({
               <h3 className="text-xl font-medium text-ink flex items-center gap-2">
                 {entry.itemName || 'Unnamed Item'}
                 {entry.isMonetary && <span className="text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">₹</span>}
-                {entry.isPendingSync && (
-                  <Badge variant="outline" className="text-[9px] border-accent/30 text-accent bg-accent/5 animate-pulse">
-                    Pending Sync
-                  </Badge>
-                )}
               </h3>
               <p className="text-sm text-ink-dim flex items-center gap-2">
                 {isLender ? `to ${entry.borrowerName || entry.borrowerEmail}` : `from ${entry.lenderName}`}
@@ -1939,68 +1627,33 @@ function EntryCard({
             )}
 
             <div className="flex flex-col gap-3 pt-4">
-              {/* Show Accept/Reject only to the receiver of the initial request */}
-              {entry.status === 'REQUESTED' && (
-                ((entry.entryType === 'lent' && !isLender) || (entry.entryType === 'borrowed' && isLender) || (!entry.entryType && !isLender)) ? (
-                  <div className="grid grid-cols-2 gap-3">
-                    <Button 
-                      onClick={() => { 
-                        const updates: any = { isPendingSync: false };
-                        if (isLender) {
-                          updates.lenderID = currentUserId;
-                          updates.lenderName = currentUserName;
-                        } else {
-                          updates.borrowerID = currentUserId;
-                          updates.borrowerName = currentUserName;
-                        }
-                        onUpdateStatus(entry.id, 'ACTIVE', updates); 
-                        setIsDetailOpen(false); 
-                      }} 
-                      className="bg-accent text-bg rounded-full h-12 font-semibold shadow-lg shadow-accent/20"
-                    >
-                      Accept
-                    </Button>
-                    <Button 
-                      variant="ghost" 
-                      onClick={() => { onUpdateStatus(entry.id, 'CANCELLED'); setIsDetailOpen(false); }} 
-                      className="text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-full h-12"
-                    >
-                      Decline
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="p-4 bg-surface-alt rounded-2xl text-center">
-                    <span className="text-sm text-ink-dim italic">Waiting for approval...</span>
-                  </div>
-                )
+              {!isLender && entry.status === 'REQUESTED' && (
+                <div className="grid grid-cols-2 gap-3">
+                  <Button onClick={() => { onUpdateStatus(entry.id, 'ACTIVE', { borrowerID: currentUserId }); setIsDetailOpen(false); }} className="bg-accent text-bg rounded-full h-12 font-semibold">
+                    Accept Request
+                  </Button>
+                  <Button variant="ghost" onClick={() => { onUpdateStatus(entry.id, 'CANCELLED'); setIsDetailOpen(false); }} className="text-ink-dim rounded-full h-12">
+                    Reject
+                  </Button>
+                </div>
               )}
 
               {entry.status === 'ACTIVE' && (
                 <Button 
-                  onClick={() => onUpdateStatus(entry.id, isLender ? 'RETURNED' : 'RETURN_REQUESTED', { 
-                    returnRequestedBy: currentUserId,
-                    returnRequestedAt: serverTimestamp()
-                  })}
-                  className="bg-accent text-bg rounded-full h-14 font-semibold text-lg shadow-lg shadow-accent/20"
+                  onClick={() => onUpdateStatus(entry.id, isLender ? 'RETURNED' : 'RETURN_REQUESTED', { returnRequestedBy: currentUserId })}
+                  className="bg-accent text-bg rounded-full h-14 font-semibold text-lg"
                 >
                   {isLender ? "Mark as Returned" : "I've Returned This"}
                 </Button>
               )}
 
-              {entry.status === 'RETURN_REQUESTED' && (
-                isLender ? (
-                  <Button 
-                    onClick={() => onUpdateStatus(entry.id, 'RETURNED')}
-                    className="bg-status-returned text-bg rounded-full h-14 font-semibold text-lg shadow-lg shadow-green-900/20"
-                  >
-                    Confirm Receipt
-                  </Button>
-                ) : (
-                  <div className="p-4 bg-surface-alt rounded-2xl text-center flex flex-col items-center gap-2">
-                    <div className="w-8 h-8 rounded-full border-2 border-accent border-t-transparent animate-spin" />
-                    <span className="text-sm text-ink-dim italic">Waiting for lender to confirm return...</span>
-                  </div>
-                )
+              {entry.status === 'RETURN_REQUESTED' && isLender && (
+                <Button 
+                  onClick={() => onUpdateStatus(entry.id, 'RETURNED')}
+                  className="bg-status-returned text-bg rounded-full h-14 font-semibold text-lg"
+                >
+                  Confirm Receipt
+                </Button>
               )}
             </div>
           </div>
