@@ -176,3 +176,26 @@
     cursor: none !important;
   }
 }
+
+/* Sophisticated Masked Blur for Headers */
+.feathery-blur {
+  backdrop-filter: blur(20px);
+  mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+}
+
+.scroll-surface {
+  transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.scroll-surface[data-scrolled="true"] {
+  background-color: rgba(10, 10, 11, 0.85);
+  border-bottom-color: rgba(212, 175, 55, 0.2);
+  backdrop-filter: blur(16px);
+}
+
+.scroll-surface[data-scrolled="false"] {
+  background-color: transparent;
+  border-bottom-color: transparent;
+  backdrop-filter: blur(0px);
+}

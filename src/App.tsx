@@ -69,16 +69,26 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [friendSearchQuery, setFriendSearchQuery] = useState('');
   const [isLendDialogOpen, setIsLendDialogOpen] = useState(false);
+  const [isBorrowDialogOpen, setIsBorrowDialogOpen] = useState(false);
   const [isAddFriendDialogOpen, setIsAddFriendDialogOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isClearInventoryOpen, setIsClearInventoryOpen] = useState(false);
   const [dropdownSearchQuery, setDropdownSearchQuery] = useState('');
   const [isSelectFriendOpen, setIsSelectFriendOpen] = useState(false);
   const [loadingFriends, setLoadingFriends] = useState(true);
+  const [scrolled, setScrolled] = useState(false);
 
   // Track seen reminders to avoid duplicate toasts
   const seenReminders = React.useRef<Set<string>>(new Set());
   const notificationSounds = React.useRef<Record<string, HTMLAudioElement>>({});
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setScrolled(window.scrollY > 10);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
 
   useEffect(() => {
     const sounds = {
@@ -156,6 +166,8 @@ export default function App() {
   const [newItemName, setNewItemName] = useState('');
   const [newBorrowerEmail, setNewBorrowerEmail] = useState('');
   const [newBorrowerName, setNewBorrowerName] = useState('');
+  const [newLenderEmail, setNewLenderEmail] = useState('');
+  const [newLenderName, setNewLenderName] = useState('');
   const [newNotes, setNewNotes] = useState('');
   const [newReturnDate, setNewReturnDate] = useState<Date | undefined>(undefined);
   const [isMonetary, setIsMonetary] = useState(false);
@@ -182,6 +194,30 @@ export default function App() {
         }
 
         setUser(userProfile);
+
+        // Required: Auto-sync pending entries where this user is the lender
+        try {
+          const qSync = query(
+            collection(db, 'borrowEntries'), 
+            where('lenderEmail', '==', userProfile.email),
+            where('isPendingSync', '==', true)
+          );
+          const syncSnapshot = await getDocs(qSync);
+          if (!syncSnapshot.empty) {
+            const batch = writeBatch(db);
+            syncSnapshot.docs.forEach(syncDoc => {
+              batch.update(syncDoc.ref, {
+                lenderID: userProfile.uid,
+                lenderName: userProfile.name,
+                isPendingSync: false
+              });
+            });
+            await batch.commit();
+            toast.success(`Synced ${syncSnapshot.size} lending records found via your email!`);
+          }
+        } catch (syncError) {
+          console.error("Auto-sync error during login:", syncError);
+        }
         
         // Save user to Firestore with error handling
         try {
@@ -213,23 +249,50 @@ export default function App() {
       return;
     }
 
-    // Listen for entries where user is lender
-    const qLender = query(collection(db, 'borrowEntries'), where('lenderID', '==', user.uid));
-    const unsubscribeLender = onSnapshot(qLender, (snapshot) => {
-      lenderEntriesRef.current = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry))
-        .filter(e => !e.hiddenByLender);
-      setEntries([...lenderEntriesRef.current, ...borrowerEntriesRef.current]);
-    }, (error) => console.error("Lender listener error:", error));
+    // Listen for entries where user is lender (by ID or email)
+    const qLenderByID = query(collection(db, 'borrowEntries'), where('lenderID', '==', user.uid));
+    const qLenderByEmail = query(collection(db, 'borrowEntries'), where('lenderEmail', '==', user.email));
+    
+    let lenderEmailEntries: BorrowEntry[] = [];
+    let lenderIDEntries: BorrowEntry[] = [];
 
-    // Listen for entries where user is borrower (by email)
-    const qBorrower = query(collection(db, 'borrowEntries'), where('borrowerEmail', '==', user.email));
-    const unsubscribeBorrower = onSnapshot(qBorrower, (snapshot) => {
-      borrowerEntriesRef.current = snapshot.docs
-        .map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry))
+    const updateAllEntries = () => {
+      const allLender = Array.from(new Map([...lenderEmailEntries, ...lenderIDEntries].map(item => [item.id, item])).values())
+        .filter(e => !e.hiddenByLender);
+      const allBorrower = Array.from(new Map([...borrowerEmailEntries, ...borrowerIDEntries].map(item => [item.id, item])).values())
         .filter(e => !e.hiddenByBorrower);
-      setEntries([...lenderEntriesRef.current, ...borrowerEntriesRef.current]);
-    }, (error) => console.error("Borrower listener error:", error));
+      
+      lenderEntriesRef.current = allLender;
+      borrowerEntriesRef.current = allBorrower;
+      setEntries([...allLender, ...allBorrower]);
+    };
+
+    const unsubscribeLenderID = onSnapshot(qLenderByID, (snapshot) => {
+      lenderIDEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
+      updateAllEntries();
+    }, (error) => console.error("Lender ID listener error:", error));
+
+    const unsubscribeLenderEmail = onSnapshot(qLenderByEmail, (snapshot) => {
+      lenderEmailEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
+      updateAllEntries();
+    }, (error) => console.error("Lender Email listener error:", error));
+
+    // Listen for entries where user is borrower (by email or ID)
+    const qBorrowerByEmail = query(collection(db, 'borrowEntries'), where('borrowerEmail', '==', user.email));
+    const qBorrowerByID = query(collection(db, 'borrowEntries'), where('borrowerID', '==', user.uid));
+    
+    let borrowerEmailEntries: BorrowEntry[] = [];
+    let borrowerIDEntries: BorrowEntry[] = [];
+
+    const unsubscribeBorrowerEmail = onSnapshot(qBorrowerByEmail, (snapshot) => {
+      borrowerEmailEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
+      updateAllEntries();
+    }, (error) => console.error("Borrower email listener error:", error));
+
+    const unsubscribeBorrowerID = onSnapshot(qBorrowerByID, (snapshot) => {
+      borrowerIDEntries = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as BorrowEntry));
+      updateAllEntries();
+    }, (error) => console.error("Borrower ID listener error:", error));
 
     // Listen for friends
     const qFriends = query(collection(db, 'friends'), where('addedBy', '==', user.uid));
@@ -247,8 +310,10 @@ export default function App() {
     });
 
     return () => {
-      unsubscribeLender();
-      unsubscribeBorrower();
+      unsubscribeLenderID();
+      unsubscribeLenderEmail();
+      unsubscribeBorrowerEmail();
+      unsubscribeBorrowerID();
       unsubscribeFriends();
       unsubscribeRequests();
     };
@@ -443,6 +508,8 @@ export default function App() {
         notes: newNotes,
         returnDate: newReturnDate ? Timestamp.fromDate(newReturnDate) : null,
         isMonetary: isMonetary,
+        entryType: 'lent',
+        isPendingSync: false,
       };
 
       if (isMonetary) {
@@ -456,6 +523,60 @@ export default function App() {
       setNewItemName('');
       setNewBorrowerEmail('');
       setNewBorrowerName('');
+      setNewNotes('');
+      setNewReturnDate(undefined);
+      setIsMonetary(false);
+      setTotalAmount('');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, 'borrowEntries');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleBorrowItem = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user || !newItemName || !newLenderEmail) return;
+
+    setIsSubmitting(true);
+    if (isMonetary) {
+      const parsedAmount = parseFloat(totalAmount);
+      if (isNaN(parsedAmount) || parsedAmount <= 0) {
+        toast.error('Please enter a valid total amount');
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    try {
+      const newEntry: any = {
+        itemName: newItemName,
+        borrowerEmail: user.email,
+        borrowerName: user.name,
+        borrowerID: user.uid,
+        lenderEmail: newLenderEmail.toLowerCase().trim(),
+        lenderName: newLenderName || 'Unknown Lender',
+        status: 'REQUESTED',
+        createdAt: serverTimestamp(),
+        notes: newNotes,
+        returnDate: newReturnDate ? Timestamp.fromDate(newReturnDate) : null,
+        isMonetary: isMonetary,
+        entryType: 'borrowed',
+        isPendingSync: true,
+        sharedTransactionId: crypto.randomUUID?.() || Math.random().toString(36).substring(2),
+      };
+
+      if (isMonetary) {
+        newEntry.totalAmount = parseFloat(totalAmount);
+        newEntry.returnedAmount = 0;
+      }
+
+      await addDoc(collection(db, 'borrowEntries'), newEntry);
+      toast.success('Successfully recorded borrowed item!');
+      setIsBorrowDialogOpen(false);
+      setNewItemName('');
+      setNewLenderEmail('');
+      setNewLenderName('');
       setNewNotes('');
       setNewReturnDate(undefined);
       setIsMonetary(false);
@@ -605,8 +726,8 @@ export default function App() {
     });
   }, [entries, searchQuery]);
 
-  const givenEntries = filteredEntries.filter(e => e.lenderID === user?.uid);
-  const takenEntries = filteredEntries.filter(e => e.borrowerEmail === user?.email);
+  const givenEntries = filteredEntries.filter(e => e.lenderID === user?.uid || e.lenderEmail === user?.email);
+  const takenEntries = filteredEntries.filter(e => e.borrowerEmail === user?.email || e.borrowerID === user?.uid);
 
   const lenderIntegrity = useMemo(() => {
     const myLentItems = entries.filter(e => e.lenderID === user?.uid);
@@ -622,6 +743,22 @@ export default function App() {
       (e.lenderID === user?.uid || e.borrowerEmail === user?.email)
     ).length;
   }, [entries, user]);
+
+  const filteredSidebarFriends = useMemo(() => {
+    return friends.filter(f => 
+      f.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) || 
+      f.email.toLowerCase().includes(friendSearchQuery.toLowerCase())
+    );
+  }, [friends, friendSearchQuery]);
+
+  const filteredDropdownFriends = useMemo(() => {
+    return friends.filter(f => 
+      f.status === 'ACCEPTED' && (
+        f?.name?.toLowerCase().includes(dropdownSearchQuery.toLowerCase()) || 
+        f?.email?.toLowerCase().includes(dropdownSearchQuery.toLowerCase())
+      )
+    );
+  }, [friends, dropdownSearchQuery]);
 
   const userBadge = useMemo(() => {
     const myBorrowedItems = entries.filter(e => e.borrowerEmail === user?.email);
@@ -714,17 +851,26 @@ export default function App() {
           friendEmail={friendEmail}
           setFriendEmail={setFriendEmail}
           handleAddFriend={handleAddFriend}
-          friends={friends}
+          friends={filteredSidebarFriends}
+          rawFriendsCount={friends.length}
           friendRequests={friendRequests}
           handleAcceptFriendRequest={handleAcceptFriendRequest}
           handleRejectFriendRequest={handleRejectFriendRequest}
           onOpenClearInventory={() => setIsClearInventoryOpen(true)}
           handleLogout={handleLogout}
+          isLendDialogOpen={isLendDialogOpen}
+          setIsLendDialogOpen={setIsLendDialogOpen}
+          isBorrowDialogOpen={isBorrowDialogOpen}
+          setIsBorrowDialogOpen={setIsBorrowDialogOpen}
         />
       </aside>
 
       {/* Mobile Header */}
-      <header className="lg:hidden sticky top-0 z-10 bg-bg/80 backdrop-blur-md border-b border-surface-alt px-6 py-4 flex items-center justify-between">
+      <header className={cn(
+        "lg:hidden sticky top-0 z-50 flex items-center justify-between px-6 py-4 border-b scroll-surface",
+        scrolled ? "scroll-surface" : "bg-transparent border-transparent"
+      )} data-scrolled={scrolled}>
+        <div className="absolute inset-0 feathery-blur pointer-events-none -z-10" />
         <div className="flex items-center gap-3">
           <Dialog open={isMobileMenuOpen} onOpenChange={setIsMobileMenuOpen}>
             <DialogTrigger render={
@@ -752,7 +898,8 @@ export default function App() {
                 friendEmail={friendEmail}
                 setFriendEmail={setFriendEmail}
                 handleAddFriend={handleAddFriend}
-                friends={friends}
+                friends={filteredSidebarFriends}
+                rawFriendsCount={friends.length}
                 friendRequests={friendRequests}
                 handleAcceptFriendRequest={handleAcceptFriendRequest}
                 handleRejectFriendRequest={handleRejectFriendRequest}
@@ -761,6 +908,10 @@ export default function App() {
                   setIsClearInventoryOpen(true);
                 }}
                 handleLogout={handleLogout}
+                isLendDialogOpen={isLendDialogOpen}
+                setIsLendDialogOpen={setIsLendDialogOpen}
+                isBorrowDialogOpen={isBorrowDialogOpen}
+                setIsBorrowDialogOpen={setIsBorrowDialogOpen}
               />
             </DialogContent>
           </Dialog>
@@ -779,6 +930,41 @@ export default function App() {
           <div className="text-ink-dim text-sm hidden sm:block">
             {format(new Date(), "MMM d, yyyy")}
           </div>
+        </div>
+
+        <div className="flex flex-col sm:flex-row gap-4 mb-12">
+          <motion.button
+            whileHover={{ scale: 1.02, translateY: -4 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setIsLendDialogOpen(true)}
+            className="flex-1 group relative overflow-hidden bg-accent text-bg p-8 rounded-[2.5rem] flex items-center justify-between border-none shadow-xl shadow-accent/20 active:shadow-none transition-all"
+          >
+            <div className="relative z-10 text-left">
+              <span className="text-[10px] uppercase tracking-[3px] font-bold opacity-60">Granting Usage</span>
+              <h2 className="text-3xl font-serif italic mt-1">Lend Item</h2>
+              <p className="text-[10px] uppercase tracking-[1px] mt-2 opacity-40">Track your belongings</p>
+            </div>
+            <div className="relative z-10 w-14 h-14 rounded-full bg-bg/20 flex items-center justify-center backdrop-blur-md group-hover:bg-bg/30 transition-colors">
+              <ArrowUpRight className="w-7 h-7" />
+            </div>
+            <div className="absolute -bottom-10 -right-10 w-40 h-40 bg-white/5 rounded-full blur-3xl group-hover:scale-150 transition-transform duration-700" />
+          </motion.button>
+
+          <motion.button
+            whileHover={{ scale: 1.02, translateY: -4 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setIsBorrowDialogOpen(true)}
+            className="flex-1 group relative overflow-hidden bg-surface-alt border border-accent/10 text-ink p-8 rounded-[2.5rem] flex items-center justify-between shadow-lg shadow-black/5 active:shadow-none transition-all"
+          >
+            <div className="relative z-10 text-left">
+              <span className="text-[10px] uppercase tracking-[3px] font-bold text-accent opacity-60">Acquiring Need</span>
+              <h2 className="text-3xl font-serif italic mt-1">Borrow Item</h2>
+              <p className="text-[10px] uppercase tracking-[1px] mt-2 text-ink-dim font-medium">Auto-sync enabled</p>
+            </div>
+            <div className="relative z-10 w-14 h-14 rounded-full bg-accent/5 border border-accent/10 flex items-center justify-center backdrop-blur-md group-hover:bg-accent/10 transition-colors">
+              <Plus className="w-7 h-7 text-accent" />
+            </div>
+          </motion.button>
         </div>
 
         <Tabs defaultValue="given" className="w-full">
@@ -887,13 +1073,8 @@ export default function App() {
         </Tabs>
       </main>
 
-      {/* FAB */}
+      {/* Lend Item Dialog */}
       <Dialog open={isLendDialogOpen} onOpenChange={setIsLendDialogOpen}>
-        <DialogTrigger render={
-          <Button className="fixed bottom-10 right-10 h-16 w-16 rounded-full bg-accent text-bg shadow-2xl shadow-accent/30 hover:scale-105 transition-transform text-3xl font-light border-none">
-            +
-          </Button>
-        } />
         <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
           <DialogHeader>
             <DialogTitle className="text-2xl font-serif italic text-accent">Lend Item</DialogTitle>
@@ -937,12 +1118,10 @@ export default function App() {
                         <div className="max-h-60 overflow-y-auto custom-scrollbar space-y-1 pr-1">
                           {friends.filter(f => f.status === 'ACCEPTED').length === 0 ? (
                             <div className="text-xs text-gray-500 italic px-2 py-2">No friends added yet.</div>
-                          ) : friends.filter(f => f.status === 'ACCEPTED' && (f?.name?.toLowerCase().includes(dropdownSearchQuery.toLowerCase()) || f?.email?.toLowerCase().includes(dropdownSearchQuery.toLowerCase()))).length === 0 ? (
+                          ) : filteredDropdownFriends.length === 0 ? (
                             <div className="text-xs text-gray-500 italic px-2 py-2">No friends found.</div>
                           ) : (
-                            friends
-                              .filter(f => f.status === 'ACCEPTED' && (f?.name?.toLowerCase().includes(dropdownSearchQuery.toLowerCase()) || f?.email?.toLowerCase().includes(dropdownSearchQuery.toLowerCase())))
-                              .map(f => (
+                            filteredDropdownFriends.map(f => (
                                 <div 
                                   key={f.id} 
                                   className="w-full flex flex-col justify-start text-left px-4 py-2 rounded-lg hover:bg-gray-700 cursor-pointer transition-colors"
@@ -1053,6 +1232,86 @@ export default function App() {
           </form>
         </DialogContent>
       </Dialog>
+
+      {/* Borrow Item Dialog */}
+      <Dialog open={isBorrowDialogOpen} onOpenChange={setIsBorrowDialogOpen}>
+        <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-serif italic text-accent">Borrow Item</DialogTitle>
+            <DialogDescription className="text-ink-dim">
+              Track items you've borrowed from others.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleBorrowItem} className="space-y-6 py-4">
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-widest text-ink-dim">Item Name</Label>
+              <Input 
+                placeholder="e.g. Lawn Mower" 
+                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                value={newItemName}
+                onChange={(e) => setNewItemName(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-widest text-ink-dim">Lender Email</Label>
+              <Input 
+                type="email"
+                placeholder="lender@example.com" 
+                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                value={newLenderEmail}
+                onChange={(e) => setNewLenderEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-widest text-ink-dim">Lender Name (Optional)</Label>
+              <Input 
+                placeholder="e.g. John Doe" 
+                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                value={newLenderName}
+                onChange={(e) => setNewLenderName(e.target.value)}
+              />
+            </div>
+
+            <div className="flex gap-4">
+              <div className="flex-1 space-y-2">
+                <Label className="text-xs uppercase tracking-widest text-ink-dim">Return Date</Label>
+                <Popover>
+                  <PopoverTrigger render={
+                    <Button variant="outline" className={cn("w-full h-12 justify-start text-left font-normal bg-surface-alt border-none rounded-xl", !newReturnDate && "text-ink-dim")}>
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {newReturnDate ? format(newReturnDate, "PPP") : "Select date"}
+                    </Button>
+                  } />
+                  <PopoverContent className="w-auto p-0 bg-surface border-surface-alt">
+                    <Calendar mode="single" selected={newReturnDate} onSelect={setNewReturnDate} initialFocus className="p-3" />
+                  </PopoverContent>
+                </Popover>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs uppercase tracking-widest text-ink-dim">Notes (Optional)</Label>
+              <Input 
+                placeholder="e.g. Mentioned I'd return it by Sunday" 
+                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                value={newNotes}
+                onChange={(e) => setNewNotes(e.target.value)}
+              />
+            </div>
+
+            <DialogFooter>
+              <Button type="submit" className="w-full h-14 bg-accent text-bg hover:bg-accent/90 rounded-full font-semibold border-none active:scale-95 transition-all" disabled={isSubmitting}>
+                {isSubmitting ? "Processing..." : "Confirm Borrowed Entry"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
       {/* Clear Inventory Dialog (Root Level) */}
       <Dialog open={isClearInventoryOpen} onOpenChange={setIsClearInventoryOpen}>
         <DialogContent className="bg-surface border-surface-alt text-ink rounded-3xl">
@@ -1097,11 +1356,16 @@ interface SidebarContentProps {
   setFriendEmail: (val: string) => void;
   handleAddFriend: (e: React.FormEvent) => Promise<void>;
   friends: Friend[];
+  rawFriendsCount: number;
   friendRequests: Friend[];
   handleAcceptFriendRequest: (request: Friend) => Promise<void>;
   handleRejectFriendRequest: (requestId: string) => Promise<void>;
   onOpenClearInventory: () => void;
   handleLogout: () => Promise<void>;
+  isLendDialogOpen: boolean;
+  setIsLendDialogOpen: (val: boolean) => void;
+  isBorrowDialogOpen: boolean;
+  setIsBorrowDialogOpen: (val: boolean) => void;
 }
 
 const SidebarContent = ({
@@ -1121,11 +1385,16 @@ const SidebarContent = ({
   setFriendEmail,
   handleAddFriend,
   friends,
+  rawFriendsCount,
   friendRequests,
   handleAcceptFriendRequest,
   handleRejectFriendRequest,
   onOpenClearInventory,
-  handleLogout
+  handleLogout,
+  isLendDialogOpen,
+  setIsLendDialogOpen,
+  isBorrowDialogOpen,
+  setIsBorrowDialogOpen
 }: SidebarContentProps) => {
   return (
     <div className="flex flex-col justify-between min-h-full">
@@ -1222,7 +1491,7 @@ const SidebarContent = ({
             </Dialog>
           </div>
           
-          {friends.length > 5 && (
+          {rawFriendsCount > 5 && (
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-ink-dim w-3 h-3" />
               <Input 
@@ -1263,11 +1532,11 @@ const SidebarContent = ({
 
           <div className="space-y-2 max-h-40 overflow-y-auto pr-2 custom-scrollbar">
             {friends.length === 0 ? (
-              <div className="text-xs text-ink-dim italic">No friends added yet.</div>
+              <div className="text-xs text-ink-dim italic">
+                {friendSearchQuery ? "No matching friends." : "No friends added yet."}
+              </div>
             ) : (
-              friends
-                .filter(f => f.name.toLowerCase().includes(friendSearchQuery.toLowerCase()) || f.email.toLowerCase().includes(friendSearchQuery.toLowerCase()))
-                .map(friend => (
+              friends.map(friend => (
                 <div key={friend.id} className="flex items-center justify-between p-2 rounded-xl hover:bg-surface-alt transition-colors group">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 bg-accent/10 rounded-full flex items-center justify-center text-[10px] text-accent font-bold">
@@ -1399,6 +1668,11 @@ function EntryCard({
               <h3 className="text-xl font-medium text-ink flex items-center gap-2">
                 {entry.itemName || 'Unnamed Item'}
                 {entry.isMonetary && <span className="text-xs bg-accent/10 text-accent px-2 py-0.5 rounded-full">₹</span>}
+                {entry.isPendingSync && (
+                  <Badge variant="outline" className="text-[9px] border-accent/30 text-accent bg-accent/5 animate-pulse">
+                    Pending Sync
+                  </Badge>
+                )}
               </h3>
               <p className="text-sm text-ink-dim flex items-center gap-2">
                 {isLender ? `to ${entry.borrowerName || entry.borrowerEmail}` : `from ${entry.lenderName}`}
