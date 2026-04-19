@@ -195,33 +195,48 @@ export default function App() {
 
         setUser(userProfile);
 
-        // Required: Auto-sync pending entries where this user is the lender
+        // Required: Auto-sync pending entries where this user is either the lender or borrower
         try {
-          const qSync = query(
+          const lEmail = userProfile.email.toLowerCase().trim();
+          
+          // 1. Sync as Lender
+          const qSyncLender = query(
             collection(db, 'borrowEntries'), 
-            where('lenderEmail', '==', userProfile.email.toLowerCase().trim()),
+            where('lenderEmail', '==', lEmail),
             where('isPendingSync', '==', true)
           );
-          const syncSnapshot = await getDocs(qSync);
-          if (!syncSnapshot.empty) {
+          const syncLSnapshot = await getDocs(qSyncLender);
+          if (!syncLSnapshot.empty) {
             const batch = writeBatch(db);
-            syncSnapshot.docs.forEach(syncDoc => {
-              const data = syncDoc.data();
-              // Update the borrow entry
+            syncLSnapshot.docs.forEach(syncDoc => {
               batch.update(syncDoc.ref, {
                 lenderID: userProfile.uid,
                 lenderName: userProfile.name,
                 isPendingSync: false
               });
-
-              // Create the corresponding lent entry in a 'borrowEntries' format (using entryType strictly)
-              // Note: The app uses 'borrowEntries' for both lent and borrowed records with an 'entryType' field
-              // However, the lender needs their own copy or the view logic needs to handle both.
-              // Looking at App.tsx filters: givenEntries = allEntries.filter(e => e.lenderID === user?.uid || e.lenderEmail === user?.email)
-              // So updating lenderID is enough for visibility, but we may need to ensure the lender's UID is set.
             });
             await batch.commit();
-            toast.success(`Found and synced ${syncSnapshot.size} records addressed to you!`);
+            toast.success(`Synced ${syncLSnapshot.size} lending records found via your email!`);
+          }
+
+          // 2. Sync as Borrower
+          const qSyncBorrower = query(
+            collection(db, 'borrowEntries'),
+            where('borrowerEmail', '==', lEmail),
+            where('isPendingSync', '==', true)
+          );
+          const syncBSnapshot = await getDocs(qSyncBorrower);
+          if (!syncBSnapshot.empty) {
+            const batch = writeBatch(db);
+            syncBSnapshot.docs.forEach(syncDoc => {
+              batch.update(syncDoc.ref, {
+                borrowerID: userProfile.uid,
+                borrowerName: userProfile.name,
+                isPendingSync: false
+              });
+            });
+            await batch.commit();
+            toast.success(`Synced ${syncBSnapshot.size} borrowed records found via your email!`);
           }
         } catch (syncError) {
           console.error("Auto-sync error during login:", syncError);
@@ -257,14 +272,17 @@ export default function App() {
       return;
     }
 
+    const userEmail = (user.email || '').toLowerCase().trim();
+
     // Listen for entries where user is lender (by ID or email)
     const qLenderByID = query(collection(db, 'borrowEntries'), where('lenderID', '==', user.uid));
-    const qLenderByEmail = query(collection(db, 'borrowEntries'), where('lenderEmail', '==', user.email));
+    const qLenderByEmail = query(collection(db, 'borrowEntries'), where('lenderEmail', '==', userEmail));
     
     let lenderEmailEntries: BorrowEntry[] = [];
     let lenderIDEntries: BorrowEntry[] = [];
 
     const updateAllEntries = () => {
+      const uEmail = userEmail;
       const allLender = Array.from(new Map([...lenderEmailEntries, ...lenderIDEntries].map(item => [item.id, item])).values())
         .filter(e => !e.hiddenByLender);
       const allBorrower = Array.from(new Map([...borrowerEmailEntries, ...borrowerIDEntries].map(item => [item.id, item])).values())
@@ -286,7 +304,7 @@ export default function App() {
     }, (error) => console.error("Lender Email listener error:", error));
 
     // Listen for entries where user is borrower (by email or ID)
-    const qBorrowerByEmail = query(collection(db, 'borrowEntries'), where('borrowerEmail', '==', user.email));
+    const qBorrowerByEmail = query(collection(db, 'borrowEntries'), where('borrowerEmail', '==', userEmail));
     const qBorrowerByID = query(collection(db, 'borrowEntries'), where('borrowerID', '==', user.uid));
     
     let borrowerEmailEntries: BorrowEntry[] = [];
@@ -311,7 +329,7 @@ export default function App() {
     });
 
     // Listen for friend requests
-    const qRequests = query(collection(db, 'friends'), where('email', '==', user.email), where('status', '==', 'PENDING'));
+    const qRequests = query(collection(db, 'friends'), where('email', '==', user.email.toLowerCase().trim()), where('status', '==', 'PENDING'));
     const unsubscribeRequests = onSnapshot(qRequests, (snapshot) => {
       const requestsList = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as Friend));
       setFriendRequests(requestsList);
@@ -510,14 +528,14 @@ export default function App() {
         lenderEmail: user.email,
         lenderName: user.name,
         borrowerEmail: newBorrowerEmail.toLowerCase().trim(),
-        borrowerName: newBorrowerName,
+        borrowerName: newBorrowerName || 'Unknown Borrower',
         status: 'REQUESTED',
         createdAt: serverTimestamp(),
         notes: newNotes,
         returnDate: newReturnDate ? Timestamp.fromDate(newReturnDate) : null,
         isMonetary: isMonetary,
         entryType: 'lent',
-        isPendingSync: false,
+        isPendingSync: true,
       };
 
       if (isMonetary) {
@@ -671,8 +689,9 @@ export default function App() {
     if (!user) return;
     
     try {
-      const myLent = entries.filter(e => e.lenderID === user.uid && !e.hiddenByLender);
-      const myBorrowed = entries.filter(e => e.borrowerEmail === user.email && !e.hiddenByBorrower);
+      const uEmail = user.email.toLowerCase().trim();
+      const myLent = entries.filter(e => (e.lenderID === user.uid || e.lenderEmail === uEmail) && !e.hiddenByLender);
+      const myBorrowed = entries.filter(e => (e.borrowerEmail === uEmail || e.borrowerID === user.uid) && !e.hiddenByBorrower);
       const allToHide = [...myLent, ...myBorrowed];
       
       if (allToHide.length === 0) {
@@ -686,8 +705,8 @@ export default function App() {
 
       uniqueEntries.forEach((entry, id) => {
         const updates: any = {};
-        if (entry.lenderID === user.uid) updates.hiddenByLender = true;
-        if (entry.borrowerEmail === user.email) updates.hiddenByBorrower = true;
+        if (entry.lenderID === user.uid || entry.lenderEmail === uEmail) updates.hiddenByLender = true;
+        if (entry.borrowerEmail === uEmail || entry.borrowerID === user.uid) updates.hiddenByBorrower = true;
         batch.update(doc(db, 'borrowEntries', id), updates);
       });
       await batch.commit();
@@ -723,10 +742,12 @@ export default function App() {
   };
 
   const filteredEntries = useMemo(() => {
+    const query = searchQuery.toLowerCase();
     return entries.filter(entry => 
-      entry.itemName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      entry.lenderName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      entry.borrowerEmail.toLowerCase().includes(searchQuery.toLowerCase())
+      (entry.itemName || '').toLowerCase().includes(query) ||
+      (entry.lenderName || '').toLowerCase().includes(query) ||
+      (entry.borrowerEmail || '').toLowerCase().includes(query) ||
+      (entry.borrowerName || '').toLowerCase().includes(query)
     ).sort((a, b) => {
       const dateA = a.createdAt?.seconds || 0;
       const dateB = b.createdAt?.seconds || 0;
@@ -734,21 +755,24 @@ export default function App() {
     });
   }, [entries, searchQuery]);
 
-  const givenEntries = filteredEntries.filter(e => e.lenderID === user?.uid || e.lenderEmail === user?.email);
-  const takenEntries = filteredEntries.filter(e => e.borrowerEmail === user?.email || e.borrowerID === user?.uid);
+  const uEmail = (user?.email || '').toLowerCase().trim();
+  const givenEntries = filteredEntries.filter(e => e.lenderID === user?.uid || (e.lenderEmail || '').toLowerCase().trim() === uEmail);
+  const takenEntries = filteredEntries.filter(e => (e.borrowerEmail || '').toLowerCase().trim() === uEmail || e.borrowerID === user?.uid);
 
   const lenderIntegrity = useMemo(() => {
-    const myLentItems = entries.filter(e => e.lenderID === user?.uid);
+    const uEmail = user?.email.toLowerCase().trim();
+    const myLentItems = entries.filter(e => e.lenderID === user?.uid || e.lenderEmail === uEmail);
     if (myLentItems.length === 0) return 100;
     const returnedItems = myLentItems.filter(e => e.status === 'RETURNED').length;
     return Math.round((returnedItems / myLentItems.length) * 100);
   }, [entries, user]);
 
   const activeLoansCount = useMemo(() => {
+    const uEmail = user?.email.toLowerCase().trim();
     return entries.filter(e => 
       e.status !== 'RETURNED' && 
       e.status !== 'CANCELLED' && 
-      (e.lenderID === user?.uid || e.borrowerEmail === user?.email)
+      (e.lenderID === user?.uid || e.lenderEmail === uEmail || e.borrowerEmail === uEmail || e.borrowerID === user?.uid)
     ).length;
   }, [entries, user]);
 
@@ -1038,6 +1062,7 @@ export default function App() {
                     onUpdateStatus={updateEntryStatus}
                     onAskBack={(tone) => handleAskBack(entry, tone)}
                     currentUserId={user.uid}
+                    currentUserName={user.name}
                     friends={friends}
                   />
                 ))
@@ -1072,6 +1097,7 @@ export default function App() {
                     onUpdateStatus={updateEntryStatus}
                     onAskBack={() => {}}
                     currentUserId={user.uid}
+                    currentUserName={user.name}
                     friends={friends}
                   />
                 ))
@@ -1609,6 +1635,7 @@ interface EntryCardProps {
   onUpdateStatus: (id: string, status: EntryStatus, extra?: any) => Promise<void>;
   onAskBack: (tone: string) => Promise<void> | void;
   currentUserId: string;
+  currentUserName: string;
   friends?: Friend[];
   key?: string;
 }
@@ -1619,6 +1646,7 @@ function EntryCard({
   onUpdateStatus, 
   onAskBack,
   currentUserId,
+  currentUserName,
   friends = []
 }: EntryCardProps) {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
@@ -1627,7 +1655,10 @@ function EntryCard({
 
   if (!entry) return null;
 
-  const friend = friends.find(f => f.email === entry.borrowerEmail);
+  const friend = friends.find(f => 
+    (entry.borrowerEmail && f.email === entry.borrowerEmail) || 
+    (entry.borrowerID && f.email === entry.borrowerEmail) // Assuming emails are stable
+  );
   const trustScore = friend?.trustScore;
 
   const returnDate = entry.returnDate?.toDate?.() || null;
@@ -1908,33 +1939,68 @@ function EntryCard({
             )}
 
             <div className="flex flex-col gap-3 pt-4">
-              {!isLender && entry.status === 'REQUESTED' && (
-                <div className="grid grid-cols-2 gap-3">
-                  <Button onClick={() => { onUpdateStatus(entry.id, 'ACTIVE', { borrowerID: currentUserId }); setIsDetailOpen(false); }} className="bg-accent text-bg rounded-full h-12 font-semibold">
-                    Accept Request
-                  </Button>
-                  <Button variant="ghost" onClick={() => { onUpdateStatus(entry.id, 'CANCELLED'); setIsDetailOpen(false); }} className="text-ink-dim rounded-full h-12">
-                    Reject
-                  </Button>
-                </div>
+              {/* Show Accept/Reject only to the receiver of the initial request */}
+              {entry.status === 'REQUESTED' && (
+                ((entry.entryType === 'lent' && !isLender) || (entry.entryType === 'borrowed' && isLender) || (!entry.entryType && !isLender)) ? (
+                  <div className="grid grid-cols-2 gap-3">
+                    <Button 
+                      onClick={() => { 
+                        const updates: any = { isPendingSync: false };
+                        if (isLender) {
+                          updates.lenderID = currentUserId;
+                          updates.lenderName = currentUserName;
+                        } else {
+                          updates.borrowerID = currentUserId;
+                          updates.borrowerName = currentUserName;
+                        }
+                        onUpdateStatus(entry.id, 'ACTIVE', updates); 
+                        setIsDetailOpen(false); 
+                      }} 
+                      className="bg-accent text-bg rounded-full h-12 font-semibold shadow-lg shadow-accent/20"
+                    >
+                      Accept
+                    </Button>
+                    <Button 
+                      variant="ghost" 
+                      onClick={() => { onUpdateStatus(entry.id, 'CANCELLED'); setIsDetailOpen(false); }} 
+                      className="text-ink-dim hover:text-red-500 hover:bg-red-500/10 rounded-full h-12"
+                    >
+                      Decline
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="p-4 bg-surface-alt rounded-2xl text-center">
+                    <span className="text-sm text-ink-dim italic">Waiting for approval...</span>
+                  </div>
+                )
               )}
 
               {entry.status === 'ACTIVE' && (
                 <Button 
-                  onClick={() => onUpdateStatus(entry.id, isLender ? 'RETURNED' : 'RETURN_REQUESTED', { returnRequestedBy: currentUserId })}
-                  className="bg-accent text-bg rounded-full h-14 font-semibold text-lg"
+                  onClick={() => onUpdateStatus(entry.id, isLender ? 'RETURNED' : 'RETURN_REQUESTED', { 
+                    returnRequestedBy: currentUserId,
+                    returnRequestedAt: serverTimestamp()
+                  })}
+                  className="bg-accent text-bg rounded-full h-14 font-semibold text-lg shadow-lg shadow-accent/20"
                 >
                   {isLender ? "Mark as Returned" : "I've Returned This"}
                 </Button>
               )}
 
-              {entry.status === 'RETURN_REQUESTED' && isLender && (
-                <Button 
-                  onClick={() => onUpdateStatus(entry.id, 'RETURNED')}
-                  className="bg-status-returned text-bg rounded-full h-14 font-semibold text-lg"
-                >
-                  Confirm Receipt
-                </Button>
+              {entry.status === 'RETURN_REQUESTED' && (
+                isLender ? (
+                  <Button 
+                    onClick={() => onUpdateStatus(entry.id, 'RETURNED')}
+                    className="bg-status-returned text-bg rounded-full h-14 font-semibold text-lg shadow-lg shadow-green-900/20"
+                  >
+                    Confirm Receipt
+                  </Button>
+                ) : (
+                  <div className="p-4 bg-surface-alt rounded-2xl text-center flex flex-col items-center gap-2">
+                    <div className="w-8 h-8 rounded-full border-2 border-accent border-t-transparent animate-spin" />
+                    <span className="text-sm text-ink-dim italic">Waiting for lender to confirm return...</span>
+                  </div>
+                )
               )}
             </div>
           </div>
