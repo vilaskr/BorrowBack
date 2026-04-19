@@ -199,21 +199,29 @@ export default function App() {
         try {
           const qSync = query(
             collection(db, 'borrowEntries'), 
-            where('lenderEmail', '==', userProfile.email),
+            where('lenderEmail', '==', userProfile.email.toLowerCase().trim()),
             where('isPendingSync', '==', true)
           );
           const syncSnapshot = await getDocs(qSync);
           if (!syncSnapshot.empty) {
             const batch = writeBatch(db);
             syncSnapshot.docs.forEach(syncDoc => {
+              const data = syncDoc.data();
+              // Update the borrow entry
               batch.update(syncDoc.ref, {
                 lenderID: userProfile.uid,
                 lenderName: userProfile.name,
                 isPendingSync: false
               });
+
+              // Create the corresponding lent entry in a 'borrowEntries' format (using entryType strictly)
+              // Note: The app uses 'borrowEntries' for both lent and borrowed records with an 'entryType' field
+              // However, the lender needs their own copy or the view logic needs to handle both.
+              // Looking at App.tsx filters: givenEntries = allEntries.filter(e => e.lenderID === user?.uid || e.lenderEmail === user?.email)
+              // So updating lenderID is enough for visibility, but we may need to ensure the lender's UID is set.
             });
             await batch.commit();
-            toast.success(`Synced ${syncSnapshot.size} lending records found via your email!`);
+            toast.success(`Found and synced ${syncSnapshot.size} records addressed to you!`);
           }
         } catch (syncError) {
           console.error("Auto-sync error during login:", syncError);
@@ -1187,32 +1195,38 @@ export default function App() {
               </div>
             )}
 
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-widest text-ink-dim">Return Date</Label>
-              <Popover>
-                <PopoverTrigger render={
-                  <Button
-                    variant={"outline"}
-                    className={cn(
-                      "w-full h-12 justify-start text-left font-normal bg-surface-alt border-none rounded-xl",
-                      !newReturnDate && "text-ink-dim"
-                    )}
-                  >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {newReturnDate ? format(newReturnDate, "PPP") : <span>Pick a date</span>}
-                  </Button>
-                } />
-                <PopoverContent className="w-auto p-0 bg-surface border-surface-alt rounded-2xl shadow-2xl" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={newReturnDate}
-                    onSelect={setNewReturnDate}
-                    initialFocus
-                    className="bg-surface text-ink"
-                    disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
-                  />
-                </PopoverContent>
-              </Popover>
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-widest text-ink-dim">Return Date</Label>
+                <Popover>
+                  <PopoverTrigger render={
+                    <Button
+                      variant={"outline"}
+                      className={cn(
+                        "w-full h-12 justify-start text-left font-normal bg-surface-alt border-none rounded-xl",
+                        !newReturnDate && "text-ink-dim focus-visible:ring-accent"
+                      )}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {newReturnDate ? format(newReturnDate, "PPP") : <span>Pick a date</span>}
+                    </Button>
+                  } />
+                  <PopoverContent className="w-auto p-0 bg-surface border-surface-alt rounded-2xl shadow-2xl" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={newReturnDate}
+                      onSelect={setNewReturnDate}
+                      initialFocus
+                      className="bg-surface text-ink"
+                      disabled={(date) => {
+                        const today = new Date();
+                        today.setHours(0,0,0,0);
+                        return date < today;
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
             <div className="space-y-2">
               <Label className="text-xs uppercase tracking-widest text-ink-dim">Notes (Optional)</Label>
@@ -1276,31 +1290,42 @@ export default function App() {
               />
             </div>
 
-            <div className="flex gap-4">
-              <div className="flex-1 space-y-2">
+            <div className="space-y-4">
+              <div className="space-y-2">
                 <Label className="text-xs uppercase tracking-widest text-ink-dim">Return Date</Label>
                 <Popover>
                   <PopoverTrigger render={
-                    <Button variant="outline" className={cn("w-full h-12 justify-start text-left font-normal bg-surface-alt border-none rounded-xl", !newReturnDate && "text-ink-dim")}>
+                    <Button variant="outline" className={cn("w-full h-12 justify-start text-left font-normal bg-surface-alt border-none rounded-xl", !newReturnDate && "text-ink-dim focus-visible:ring-accent")}>
                       <CalendarIcon className="mr-2 h-4 w-4" />
                       {newReturnDate ? format(newReturnDate, "PPP") : "Select date"}
                     </Button>
                   } />
-                  <PopoverContent className="w-auto p-0 bg-surface border-surface-alt">
-                    <Calendar mode="single" selected={newReturnDate} onSelect={setNewReturnDate} initialFocus className="p-3" />
+                  <PopoverContent className="w-auto p-0 bg-surface border-surface-alt rounded-2xl shadow-2xl" align="start">
+                    <Calendar 
+                      mode="single" 
+                      selected={newReturnDate} 
+                      onSelect={setNewReturnDate} 
+                      initialFocus 
+                      className="bg-surface text-ink"
+                      disabled={(date) => {
+                        const today = new Date();
+                        today.setHours(0,0,0,0);
+                        return date < today;
+                      }}
+                    />
                   </PopoverContent>
                 </Popover>
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label className="text-xs uppercase tracking-widest text-ink-dim">Notes (Optional)</Label>
-              <Input 
-                placeholder="e.g. Mentioned I'd return it by Sunday" 
-                className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
-                value={newNotes}
-                onChange={(e) => setNewNotes(e.target.value)}
-              />
+              <div className="space-y-2">
+                <Label className="text-xs uppercase tracking-widest text-ink-dim">Notes (Optional)</Label>
+                <Input 
+                  placeholder="e.g. Mentioned I'd return it by Sunday" 
+                  className="bg-surface-alt border-none h-12 rounded-xl focus-visible:ring-accent"
+                  value={newNotes}
+                  onChange={(e) => setNewNotes(e.target.value)}
+                />
+              </div>
             </div>
 
             <DialogFooter>
